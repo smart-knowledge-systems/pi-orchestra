@@ -85,7 +85,7 @@
         "P1-T2",
         "P1-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Artifacts can be persisted and reloaded by ID",
         "Typed retrieval validates artifact_type on read",
@@ -107,7 +107,7 @@
       "dependencies": [
         "P1-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Session state can be initialized and reloaded",
         "Current stage and artifact pointers persist across restarts",
@@ -129,7 +129,7 @@
       "dependencies": [
         "P1-T5"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Stage machine exposes current stage and transition helpers",
         "Prompt constants are centralized for later phases",
