@@ -26,3 +26,21 @@ jobs:
       - name: Validate package metadata
         run: |
           node -e 'const p=require("./package.json"); if(p.name!=="pi-orchestra") throw new Error("package name mismatch"); if(!p.bin || !p.bin.piorx) throw new Error("missing piorx bin"); console.log("package ok")'
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun test
