@@ -620,11 +620,11 @@ describe('evidenceAssemble preview mode', () => {
     expect(result.message).toContain('Unknown file_id');
   });
 
-  it('materialize mode still returns not_implemented', async () => {
+  it('materialize mode returns error for missing plan', async () => {
     const result = await evidenceAssemble(
       { mode: 'materialize', retrieval_index_id: 'ri_test', evidence_plan_id: 'plan_test' },
       store,
     );
-    expect(result.status).toBe('not_implemented');
+    expect(result.status).toBe('error');
   });
 });
