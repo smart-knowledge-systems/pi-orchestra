@@ -68,27 +68,6 @@ active_tasks_json() {
   jq '[.tasks[] | select(.status == "active")]' "$TASKS_FILE"
 }
 
-read_lines_into_array() {
-  local __var_name="$1"
-  local __data="$2"
-  local __line
-  local __arr=()
-
-  while IFS= read -r __line; do
-    [ -n "$__line" ] && __arr+=("$__line")
-  done <<EOF
-$__data
-EOF
-
-  eval "$__var_name=()"
-  if [ "${#__arr[@]}" -gt 0 ]; then
-    local __i
-    for __i in "${__arr[@]}"; do
-      eval "$__var_name+=(\"\$__i\")"
-    done
-  fi
-}
-
 mark_ids_status() {
   local status="$1"
   shift
@@ -385,14 +364,14 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
       fi
 
       ids_to_activate_data="$(printf '%s\n' "$selected_ids" | sed '/^$/d' | head -n 3)"
-      ids_to_activate=()
-      read_lines_into_array ids_to_activate "$ids_to_activate_data"
-      if [ "${#ids_to_activate[@]}" -eq 0 ]; then
+      if [ -z "$ids_to_activate_data" ]; then
         echo "Could not determine tasks to activate." >&2
         exit 1
       fi
 
-      mark_ids_status "active" "${ids_to_activate[@]}"
+      ids_to_activate_args="$(printf '%s\n' "$ids_to_activate_data" | paste -sd ' ' -)"
+      # shellcheck disable=SC2086
+      mark_ids_status "active" $ids_to_activate_args
     fi
   fi
 
@@ -404,21 +383,24 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
 
   echo "Evaluating active tasks..."
   active_ids_data="$(jq -r '.tasks[] | select(.status == "active") | .id' "$TASKS_FILE")"
-  active_ids=()
-  read_lines_into_array active_ids "$active_ids_data"
 
-  for task_id in "${active_ids[@]}"; do
-    task_json="$(jq --arg id "$task_id" -c '.tasks[] | select(.id == $id)' "$TASKS_FILE")"
-    eval_response="$(evaluate_task_with_sonnet "$task_json" || true)"
+  if [ -n "$active_ids_data" ]; then
+    while IFS= read -r task_id; do
+      [ -n "$task_id" ] || continue
+      task_json="$(jq --arg id "$task_id" -c '.tasks[] | select(.id == $id)' "$TASKS_FILE")"
+      eval_response="$(evaluate_task_with_sonnet "$task_json" || true)"
 
-    if [ "$DRY_RUN" = "1" ]; then
-      log_dry_run "Would evaluate task $task_id and update its status based on yes/no response."
-    elif printf '%s' "$eval_response" | tr '[:upper:]' '[:lower:]' | grep -Eq '\byes\b'; then
-      mark_ids_status "completed" "$task_id"
-    else
-      mark_ids_status "in_progress" "$task_id"
-    fi
-  done
+      if [ "$DRY_RUN" = "1" ]; then
+        log_dry_run "Would evaluate task $task_id and update its status based on yes/no response."
+      elif printf '%s' "$eval_response" | tr '[:upper:]' '[:lower:]' | grep -Eq '\byes\b'; then
+        mark_ids_status "completed" "$task_id"
+      else
+        mark_ids_status "in_progress" "$task_id"
+      fi
+    done <<EOF
+$active_ids_data
+EOF
+  fi
 
   echo "Creating atomic commits..."
   commit_with_haiku || true
