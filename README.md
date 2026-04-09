@@ -14,7 +14,7 @@ The CLI alias is `piorx`.
 
 ## Status
 
-This repository currently contains the initial project scaffold and the first-pass architecture/specification docs.
+Phase 1–6 of the conductor workflow are implemented end-to-end: deterministic artifact store, Stage 1 restatement loop, expansion protocol, retrieval dispatch with a bounded worker, deterministic evidence planning and assembly, synthesis dispatch with task-type selection, execution dispatch with safety constraints, and recursive-restart promotion. **376 tests pass under `bun test`** and `tsc --noEmit` is clean. See [`docs/completion_summary.md`](./docs/completion_summary.md) for the phase-by-phase breakdown and [`implementation-phase-1.md`](./implementation-phase-1.md) for the plan.
 
 ## Install UX
 
@@ -62,16 +62,37 @@ piorx
 
 ```text
 README.md
+implementation-phase-1.md
+implementation-tasks.json
 package.json
 bin/
   piorx
 extensions/
   conductor-extension.ts
+src/
+  artifacts/      # types, schemas, ids, store
+  runtime/        # config, paths, session-state
+  conductor/      # stage machine, stage-1, expansion, retrieval, evidence-plan, synthesis, recursive-intent
+  services/       # intent-expand, retrieval-dispatch, evidence-assembler, synthesis-dispatch, execution-dispatch, artifact-promote, artifact-inspect
+  retriever/      # prompt, worker, normalize, symbol-extractor
+  synthesis/      # prompt, worker
+  execution/      # worker
+  util/           # project-docs, spans, budget
+tests/
+  artifacts/ assembler/ conductor/ execution/ fixtures/ interaction/ retriever/ synthesis/
 scripts/
   install-pi.sh
   doctor.sh
 docs/
   specification/
+```
+
+## Running tests
+
+```bash
+bun test          # full suite (376 tests)
+bun run typecheck # tsc --noEmit
+bun run check     # typecheck + lint
 ```
 
 ## Development
