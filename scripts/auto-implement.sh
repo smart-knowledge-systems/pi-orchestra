@@ -68,6 +68,21 @@ active_tasks_json() {
   jq '[.tasks[] | select(.status == "active")]' "$TASKS_FILE"
 }
 
+read_lines_into_array() {
+  local __var_name="$1"
+  local __data="$2"
+  local __line
+  local __arr=()
+
+  while IFS= read -r __line; do
+    [ -n "$__line" ] && __arr+=("$__line")
+  done <<EOF
+$__data
+EOF
+
+  eval "$__var_name=(\"\${__arr[@]}\")"
+}
+
 mark_ids_status() {
   local status="$1"
   shift
@@ -363,7 +378,8 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
         fi
       fi
 
-      mapfile -t ids_to_activate < <(printf '%s\n' "$selected_ids" | sed '/^$/d' | head -n 3)
+      ids_to_activate_data="$(printf '%s\n' "$selected_ids" | sed '/^$/d' | head -n 3)"
+      read_lines_into_array ids_to_activate "$ids_to_activate_data"
       if [ "${#ids_to_activate[@]}" -eq 0 ]; then
         echo "Could not determine tasks to activate." >&2
         exit 1
@@ -380,7 +396,8 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
   run_bun_check_loop >/dev/null
 
   echo "Evaluating active tasks..."
-  mapfile -t active_ids < <(jq -r '.tasks[] | select(.status == "active") | .id' "$TASKS_FILE")
+  active_ids_data="$(jq -r '.tasks[] | select(.status == "active") | .id' "$TASKS_FILE")"
+  read_lines_into_array active_ids "$active_ids_data"
 
   for task_id in "${active_ids[@]}"; do
     task_json="$(jq --arg id "$task_id" -c '.tasks[] | select(.id == $id)' "$TASKS_FILE")"
