@@ -11,10 +11,18 @@
   "scripts": {
     "install:pi": "bash ./scripts/install-pi.sh",
     "doctor": "bash ./scripts/doctor.sh",
-    "link": "npm link"
+    "link": "npm link",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
+    "check": "bun run typecheck && bun run lint",
+    "format": "prettier --write ."
   },
   "engines": {
     "bun": ">=1.0.0",
     "node": ">=20"
+  },
+  "devDependencies": {
+    "biome": "^0.3.3",
+    "prettier": "^3.8.1"
   }
 }
