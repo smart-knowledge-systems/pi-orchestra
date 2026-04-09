@@ -80,7 +80,13 @@ read_lines_into_array() {
 $__data
 EOF
 
-  eval "$__var_name=(\"\${__arr[@]}\")"
+  eval "$__var_name=()"
+  if [ "${#__arr[@]}" -gt 0 ]; then
+    local __i
+    for __i in "${__arr[@]}"; do
+      eval "$__var_name+=(\"\$__i\")"
+    done
+  fi
 }
 
 mark_ids_status() {
@@ -379,6 +385,7 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
       fi
 
       ids_to_activate_data="$(printf '%s\n' "$selected_ids" | sed '/^$/d' | head -n 3)"
+      ids_to_activate=()
       read_lines_into_array ids_to_activate "$ids_to_activate_data"
       if [ "${#ids_to_activate[@]}" -eq 0 ]; then
         echo "Could not determine tasks to activate." >&2
@@ -397,6 +404,7 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
 
   echo "Evaluating active tasks..."
   active_ids_data="$(jq -r '.tasks[] | select(.status == "active") | .id' "$TASKS_FILE")"
+  active_ids=()
   read_lines_into_array active_ids "$active_ids_data"
 
   for task_id in "${active_ids[@]}"; do

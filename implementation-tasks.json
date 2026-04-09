@@ -152,7 +152,7 @@
         "P1-T5",
         "P1-T6"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Extension boot initializes runtime state without errors",
         "Store and session state are available from extension startup",
@@ -179,7 +179,7 @@
         "P1-T1",
         "P1-T4"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Each planned service has typed input/output contracts",
         "Stub services return explicit not-implemented or fixture-backed results",
@@ -199,7 +199,7 @@
         ".github/workflows/ci.yml"
       ],
       "dependencies": [],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "npm test executes the new test suite",
         "Core Phase 1 tests run in CI or documented local workflow",
@@ -225,7 +225,7 @@
         "P1-T6",
         "P1-T7"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "acceptance_criteria": [
         "Conductor emits the required canonical restatement message shape",
         "Approval turns are tracked",
