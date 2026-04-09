@@ -1,0 +1,25 @@
+{
+  "artifact_type": "intent-spec-v1",
+  "artifact_id": "spec_001",
+  "expansion_input_id": "expand_in_001",
+  "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+  "approved_restated_intent": "You want to understand the current model-restore flow and possibly prepare for modifying it.",
+  "expanded_spec": {
+    "objective": "Understand session model restore behavior and identify safe modification points",
+    "deliverables": [
+      "architecture explanation",
+      "relevant files and symbols",
+      "modification boundaries",
+      "risks and fallback behavior"
+    ],
+    "constraints": ["do not change code yet", "focus on restore and fallback behavior"],
+    "retrieval_focus": [
+      "restore entrypoints",
+      "fallback logic",
+      "auth checks",
+      "default provider/model selection"
+    ],
+    "open_questions": ["should unknown custom model ids be preserved?"]
+  },
+  "approved": true
+}

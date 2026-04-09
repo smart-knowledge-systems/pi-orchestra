@@ -1,0 +1,43 @@
+{
+  "artifact_type": "evidence-plan-v1",
+  "artifact_id": "plan_001",
+  "retrieval_index": {
+    "artifact_type": "retrieval-index-v1",
+    "artifact_id": "retrieval_001"
+  },
+  "selection": {
+    "files": [
+      {
+        "file_id": "f1",
+        "include_ast_skeleton": true,
+        "include_retriever_summary": true,
+        "include_entire_file": false,
+        "spans": [
+          {
+            "symbol_id": "s1",
+            "include_span": true,
+            "neighbor_lines": 8
+          }
+        ]
+      }
+    ],
+    "include_cross_file_findings": true,
+    "include_gaps": false,
+    "include_followup_queries": false
+  },
+  "assembly_options": {
+    "max_total_lines": 1200,
+    "max_estimated_tokens": 12000,
+    "dedupe_overlapping_spans": true,
+    "span_merge_strategy": "merge_if_overlapping"
+  },
+  "prompt_sections": {
+    "include_intent_context": true,
+    "include_structural_context": true,
+    "include_raw_evidence": true
+  },
+  "target_task": {
+    "type": "change-spec",
+    "task_label": "prepare modification handoff"
+  }
+}

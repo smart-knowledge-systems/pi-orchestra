@@ -1,0 +1,18 @@
+{
+  "artifact_type": "expansion-input-v1",
+  "artifact_id": "expand_in_001",
+  "intent_capture_id": "intent_001",
+  "intent_restatement_id": "restatement_001",
+  "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+  "approved_restated_intent": "You want to understand the current model-restore flow and possibly prepare for modifying it.",
+  "included_files": [
+    {
+      "path": "docs/models.md",
+      "reason": "user-tagged"
+    },
+    {
+      "path": "AGENTS.md",
+      "reason": "user-approved project doc"
+    }
+  ]
+}

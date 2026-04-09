@@ -1,0 +1,15 @@
+{
+  "artifact_type": "execution-report-v1",
+  "artifact_id": "exec_001",
+  "change_spec_id": "change_001",
+  "status": "completed",
+  "modified_files": [
+    "/abs/path/src/core/model-resolver.ts",
+    "/abs/path/test/model-resolver.test.ts"
+  ],
+  "validation": {
+    "commands": ["npm test -- model-resolver"],
+    "passed": true
+  },
+  "notes": ["Adjusted restore logic and added regression tests"]
+}

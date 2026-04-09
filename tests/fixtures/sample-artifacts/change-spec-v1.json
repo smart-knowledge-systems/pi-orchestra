@@ -1,0 +1,37 @@
+{
+  "artifact_type": "change-spec-v1",
+  "artifact_id": "change_001",
+  "evidence_bundle_id": "bundle_001",
+  "change_goal": "Preserve valid custom model ids during session restore when provider auth exists",
+  "summary": "Adjust restore flow to allow custom model restoration under known providers without changing other fallback behavior.",
+  "edits": [
+    {
+      "path": "/abs/path/src/core/model-resolver.ts",
+      "target": {
+        "kind": "function",
+        "name": "restoreModelFromSession",
+        "start": 420,
+        "count": 70
+      },
+      "intent": "Permit custom model restoration under known providers when auth is configured",
+      "required_changes": [
+        "Check provider availability before rejecting unknown model IDs",
+        "Construct a custom-model fallback object when appropriate",
+        "Preserve existing behavior for missing auth"
+      ],
+      "constraints": [
+        "Do not alter CLI model resolution",
+        "Do not change default provider model selection"
+      ]
+    }
+  ],
+  "tests": [
+    "restore known model with auth",
+    "restore unknown custom model under known provider with auth",
+    "fallback when auth is absent"
+  ],
+  "acceptance_criteria": [
+    "session restore succeeds for valid custom provider/model combinations",
+    "existing built-in restore behavior remains unchanged"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "artifact_type": "intent-restatement-v1",
+  "artifact_id": "restatement_001",
+  "intent_capture_id": "intent_001",
+  "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+  "restated_intent": "You want to understand the current model-restore flow and possibly prepare for modifying it.",
+  "approved": true,
+  "expand_requested": true,
+  "approval_turns": 1
+}

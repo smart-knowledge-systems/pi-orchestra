@@ -1,0 +1,7 @@
+{
+  "artifact_type": "intent-capture-v1",
+  "artifact_id": "intent_001",
+  "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+  "tagged_files": ["docs/models.md", "src/core/model-resolver.ts"],
+  "timestamp": "2026-04-09T00:00:00Z"
+}

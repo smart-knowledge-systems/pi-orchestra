@@ -1,0 +1,12 @@
+{
+  "artifact_type": "analysis-report-v1",
+  "artifact_id": "analysis_001",
+  "evidence_bundle_id": "bundle_001",
+  "summary": "Model restore first attempts exact restoration and then falls back when auth or availability checks fail.",
+  "findings": [
+    "restoreModelFromSession is the restore entrypoint",
+    "fallback selection depends on provider availability and auth"
+  ],
+  "risks": ["changing fallback semantics may affect session continuity"],
+  "recommended_next_steps": ["inspect model-registry auth path", "prepare a focused change spec"]
+}

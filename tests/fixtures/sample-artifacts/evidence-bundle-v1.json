@@ -1,0 +1,45 @@
+{
+  "artifact_type": "evidence-bundle-v1",
+  "artifact_id": "bundle_001",
+  "evidence_plan_id": "plan_001",
+  "intent_context": {
+    "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+    "approved_restated_intent": "You want to understand the current model-restore flow and possibly prepare for modifying it.",
+    "intent_spec_id": "spec_001"
+  },
+  "structural_context": {
+    "files": [
+      {
+        "path": "/abs/path/src/core/model-resolver.ts",
+        "file_summary": "Model resolution and restore fallback behavior",
+        "ast_skeleton": ["const defaultModelPerProvider", "function restoreModelFromSession(...)"],
+        "symbols": [
+          {
+            "name": "restoreModelFromSession",
+            "start": 420,
+            "count": 70,
+            "summary": "Restores a saved model or falls back when unavailable"
+          }
+        ]
+      }
+    ],
+    "cross_file_findings": ["Restore behavior depends on registry availability and auth"]
+  },
+  "raw_evidence": [
+    {
+      "path": "/abs/path/src/core/model-resolver.ts",
+      "kind": "span",
+      "label": "restoreModelFromSession",
+      "start": 412,
+      "count": 86,
+      "content": "// placeholder raw content"
+    }
+  ],
+  "stats": {
+    "files": 1,
+    "spans": 1,
+    "full_files": 0,
+    "total_lines": 86,
+    "estimated_tokens": 1800
+  }
+}

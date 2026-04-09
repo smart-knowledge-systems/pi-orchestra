@@ -1,0 +1,46 @@
+{
+  "artifact_type": "retrieval-index-v1",
+  "artifact_id": "retrieval_001",
+  "intent_capture_id": "intent_001",
+  "intent_restatement_id": "restatement_001",
+  "intent_spec_id": "spec_001",
+  "query": "Understand model restore flow and modification boundaries",
+  "confidence": "high",
+  "files": [
+    {
+      "file_id": "f1",
+      "path": "/abs/path/src/core/model-resolver.ts",
+      "why_relevant": "Contains restore and fallback logic",
+      "file_summary": "Model resolution and restore fallback behavior",
+      "ast_skeleton": [
+        "const defaultModelPerProvider",
+        "function resolveCliModel(...)",
+        "function findInitialModel(...)",
+        "function restoreModelFromSession(...)"
+      ],
+      "recommended_expansion": "span",
+      "expansion_reason": "Fallback logic is concentrated in one function",
+      "symbols": [
+        {
+          "symbol_id": "s1",
+          "kind": "function",
+          "name": "restoreModelFromSession",
+          "start": 420,
+          "count": 70,
+          "summary": "Restores a saved model or falls back when unavailable",
+          "role_in_system": "session restore entrypoint",
+          "depends_on": ["modelRegistry.find", "modelRegistry.hasConfiguredAuth"],
+          "used_by": ["session startup restore flow"],
+          "relevance": "high",
+          "change_likelihood": "high",
+          "expansion_priority": "high",
+          "recommended_expansion": "span",
+          "expansion_reason": "Likely contains the exact restore decision logic"
+        }
+      ]
+    }
+  ],
+  "cross_file_findings": ["Restore behavior depends on registry availability and auth"],
+  "gaps": ["Need auth resolution details from model-registry.ts"],
+  "followup_queries": ["model registry auth configured availability"]
+}
