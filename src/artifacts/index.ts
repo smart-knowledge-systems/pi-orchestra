@@ -34,3 +34,4 @@ export {
 
 export { generateArtifactId, artifactTypePrefix } from './ids.ts';
 export { validateArtifact, validators, type ValidationResult } from './schemas.ts';
+export { ArtifactStore, ArtifactStoreError } from './store.ts';
