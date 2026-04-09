@@ -16,7 +16,7 @@
         "src/artifacts/index.ts"
       ],
       "dependencies": [],
-      "status": "active",
+      "status": "completed",
       "acceptance_criteria": [
         "All v1 artifact types are represented in TypeScript",
         "Artifacts share a common discriminant field for artifact_type",
@@ -39,7 +39,7 @@
       "dependencies": [
         "P1-T1"
       ],
-      "status": "active",
+      "status": "completed",
       "acceptance_criteria": [
         "Every v1 artifact has a validator",
         "Invalid artifacts fail with clear errors",
@@ -62,7 +62,7 @@
       "dependencies": [
         "P1-T1"
       ],
-      "status": "active",
+      "status": "completed",
       "acceptance_criteria": [
         "Artifact IDs are unique and type-aware in shape",
         "Each artifact type maps to a stable on-disk directory",
