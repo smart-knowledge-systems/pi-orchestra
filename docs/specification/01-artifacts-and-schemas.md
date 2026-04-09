@@ -15,10 +15,7 @@ Captured from the user before any restatement.
   "artifact_type": "intent-capture-v1",
   "artifact_id": "intent_001",
   "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
-  "tagged_files": [
-    "docs/models.md",
-    "src/core/model-resolver.ts"
-  ],
+  "tagged_files": ["docs/models.md", "src/core/model-resolver.ts"],
   "timestamp": "2026-04-09T00:00:00Z"
 }
 ```
@@ -111,19 +108,14 @@ Produced by the slow-cheap expansion stage and approved by the user.
       "modification boundaries",
       "risks and fallback behavior"
     ],
-    "constraints": [
-      "do not change code yet",
-      "focus on restore and fallback behavior"
-    ],
+    "constraints": ["do not change code yet", "focus on restore and fallback behavior"],
     "retrieval_focus": [
       "restore entrypoints",
       "fallback logic",
       "auth checks",
       "default provider/model selection"
     ],
-    "open_questions": [
-      "should unknown custom model ids be preserved?"
-    ]
+    "open_questions": ["should unknown custom model ids be preserved?"]
   },
   "approved": true
 }
@@ -167,13 +159,8 @@ Full retriever output. This is passed to the evidence assembler unchanged.
           "count": 70,
           "summary": "Restores a saved model or falls back when unavailable",
           "role_in_system": "session restore entrypoint",
-          "depends_on": [
-            "modelRegistry.find",
-            "modelRegistry.hasConfiguredAuth"
-          ],
-          "used_by": [
-            "session startup restore flow"
-          ],
+          "depends_on": ["modelRegistry.find", "modelRegistry.hasConfiguredAuth"],
+          "used_by": ["session startup restore flow"],
           "relevance": "high",
           "change_likelihood": "high",
           "expansion_priority": "high",
@@ -183,15 +170,9 @@ Full retriever output. This is passed to the evidence assembler unchanged.
       ]
     }
   ],
-  "cross_file_findings": [
-    "Restore behavior depends on registry availability and auth"
-  ],
-  "gaps": [
-    "Need auth resolution details from model-registry.ts"
-  ],
-  "followup_queries": [
-    "model registry auth configured availability"
-  ]
+  "cross_file_findings": ["Restore behavior depends on registry availability and auth"],
+  "gaps": ["Need auth resolution details from model-registry.ts"],
+  "followup_queries": ["model registry auth configured availability"]
 }
 ```
 
@@ -277,10 +258,7 @@ Produced deterministically by the evidence assembler.
       {
         "path": "/abs/path/src/core/model-resolver.ts",
         "file_summary": "Model resolution and restore fallback behavior",
-        "ast_skeleton": [
-          "const defaultModelPerProvider",
-          "function restoreModelFromSession(...)"
-        ],
+        "ast_skeleton": ["const defaultModelPerProvider", "function restoreModelFromSession(...)"],
         "symbols": [
           {
             "name": "restoreModelFromSession",
@@ -291,9 +269,7 @@ Produced deterministically by the evidence assembler.
         ]
       }
     ],
-    "cross_file_findings": [
-      "Restore behavior depends on registry availability and auth"
-    ]
+    "cross_file_findings": ["Restore behavior depends on registry availability and auth"]
   },
   "raw_evidence": [
     {
@@ -338,13 +314,8 @@ For explanatory and planning outputs.
     "restoreModelFromSession is the restore entrypoint",
     "fallback selection depends on provider availability and auth"
   ],
-  "risks": [
-    "changing fallback semantics may affect session continuity"
-  ],
-  "recommended_next_steps": [
-    "inspect model-registry auth path",
-    "prepare a focused change spec"
-  ]
+  "risks": ["changing fallback semantics may affect session continuity"],
+  "recommended_next_steps": ["inspect model-registry auth path", "prepare a focused change spec"]
 }
 ```
 
@@ -411,14 +382,10 @@ Produced by the local execution agent.
     "/abs/path/test/model-resolver.test.ts"
   ],
   "validation": {
-    "commands": [
-      "npm test -- model-resolver"
-    ],
+    "commands": ["npm test -- model-resolver"],
     "passed": true
   },
-  "notes": [
-    "Adjusted restore logic and added regression tests"
-  ]
+  "notes": ["Adjusted restore logic and added regression tests"]
 }
 ```
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
 /**
  * Minimal conductor extension entrypoint.
@@ -7,5 +7,5 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
  * Future work will implement the full conductor workflow described in docs/specification/.
  */
 export default function (_pi: ExtensionAPI) {
-	// no-op for now
+  // no-op for now
 }

@@ -36,6 +36,7 @@ You should read these docs fully before planning:
 Create a practical implementation plan that converts the specification into buildable phases for this repo.
 
 Your plan should:
+
 - break implementation into coherent phases
 - identify deliverables for each phase
 - identify dependencies between phases
@@ -47,12 +48,14 @@ Your plan should:
 ## Important project context
 
 This repo is intentionally set up so that:
+
 - plain `pi` does **not** include this project automatically
 - `piorx` is the wrapper entrypoint that runs `pi` with this repo's extension entrypoint
 - current extension entrypoint is a minimal stub at:
   - `extensions/conductor-extension.ts`
 
 The implementation should follow the specification language already adopted in the repo:
+
 - use **conductor**, not orchestrator
 - keep the **evidence assembler deterministic and non-agentic**
 - keep the **conductor unable to read raw repository source**
@@ -113,6 +116,7 @@ Useful current files:
 Please create an implementation plan that is concrete enough that another agent could begin executing Phase 1 immediately.
 
 For each phase, include at least:
+
 - objective
 - scope
 - files/modules likely to be created or modified
@@ -122,6 +126,7 @@ For each phase, include at least:
 - deferred items
 
 If useful, split the work into tracks such as:
+
 - extension/UI track
 - artifact/runtime track
 - retriever track

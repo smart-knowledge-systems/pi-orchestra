@@ -174,6 +174,7 @@ Stage 1 is a strict approval loop.
 ### 6.1 Required conductor response shape
 
 The conductor should respond with exactly:
+
 1. a simple restatement
 2. a correctness check
 3. an expansion question
@@ -199,10 +200,12 @@ Would you like me to expand this into a fuller specification before I retrieve r
 ## 7. Expansion inclusion protocol
 
 If `tagged_files` is non-empty:
+
 - include all tagged files in the expansion input automatically
 - do not ask whether to include them
 
 If `tagged_files` is empty and any of these files exist:
+
 - `README.md`
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -241,6 +244,7 @@ Would you like to approve this specification for retrieval? (approve / revise / 
 ## 9. Retrieval dispatch protocol
 
 Retriever input should be composed from:
+
 - `user_intent_verbatim`
 - `approved_restated_intent`
 - optional approved `intent-spec-v1`
@@ -250,6 +254,7 @@ The retriever should be prompted to treat the approved expanded spec as highest-
 ## 10. Evidence planning protocol
 
 After retrieval, the conductor should reason over:
+
 - file summaries
 - AST skeletons
 - symbol summaries
@@ -258,6 +263,7 @@ After retrieval, the conductor should reason over:
 - gaps and followup queries
 
 It should then create an evidence plan by deciding, per file:
+
 - include AST skeleton? yes/no
 - include retriever summary? yes/no
 - include resolved spans? yes/no
@@ -282,17 +288,21 @@ Would you like me to promote it into a new intent and restart the Stage 1 approv
 ```
 
 If yes:
+
 - generate `recursive-intent-v1`
 - restart at Stage 1
 
 ## 12. Suggested rendering conventions
 
 ### Restatement rendering
+
 - one quoted sentence or short paragraph
 - no bullet list unless needed
 
 ### Expanded spec rendering
+
 Use headings:
+
 - Objective
 - Deliverables
 - Constraints
@@ -300,7 +310,9 @@ Use headings:
 - Open questions
 
 ### Retrieval rendering
+
 For human review, show:
+
 - file path
 - file summary
 - AST skeleton
@@ -308,6 +320,7 @@ For human review, show:
 - relevance
 
 ### Evidence-plan rendering
+
 For human review, show a compact matrix:
 
 ```text
@@ -321,25 +334,31 @@ For human review, show a compact matrix:
 ## 13. Failure and recovery protocol
 
 ### If retriever confidence is low
+
 The conductor should either:
+
 - request another retrieval pass
 - narrow the task
 - or ask the user for clarification
 
 ### If expansion is too broad
+
 The conductor should ask the user whether to narrow scope before retrieval.
 
 ### If bundle size exceeds limits
+
 The conductor should revise the evidence plan, not read the raw evidence.
 
 ## 14. Example Stage 1 exchange
 
 ### User
+
 ```text
 I want to understand how model restore works and maybe change it.
 ```
 
 ### Conductor
+
 ```text
 Here is my restatement of your intent:
 
@@ -350,11 +369,13 @@ Would you like me to expand this into a fuller specification before I retrieve r
 ```
 
 ### User
+
 ```text
 yes, that's correct, and yes expand it
 ```
 
 ### Conductor, if no tagged files and docs exist
+
 ```text
 I found the following project context files that could help with intent expansion:
 - README.md
@@ -364,21 +385,25 @@ Would you like me to include any or all of them in the expansion prompt? If so, 
 ```
 
 ### User
+
 ```text
 all
 ```
 
 ### Conductor
+
 Dispatch expansion.
 
 ## 15. Example recursive restart
 
 ### Synthesizer output
+
 ```text
 The current evidence supports a change specification for restore behavior.
 ```
 
 ### Conductor
+
 ```text
 This synthesis result can be used as a new intent for a follow-up stage.
 Would you like me to promote it into a new intent and restart the Stage 1 approval loop? (yes/no)

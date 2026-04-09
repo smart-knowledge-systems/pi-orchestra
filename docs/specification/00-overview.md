@@ -23,10 +23,13 @@ This specification defines a layered pi-based orchestration system for intent cl
 ## Stages
 
 ### Stage 0: User intent capture
+
 The user provides an initial intent.
 
 ### Stage 1: Restatement and approval loop
+
 The conductor:
+
 - produces a **simple restatement** of the user's intent
 - asks whether the restatement is correct
 - asks whether the user wants the intent expanded into a fuller specification before retrieval
@@ -34,7 +37,9 @@ The conductor:
 If the restatement is incorrect, the user corrects it and Stage 1 repeats.
 
 ### Stage 2: Optional expansion
+
 If the user requests expansion:
+
 - the system sends the **verbatim initial intent** and the **approved restated intent** to a slow-cheap model/batch
 - optionally includes tagged files and approved project docs
 - returns an expanded, reviewable specification
@@ -43,7 +48,9 @@ If the user requests expansion:
 If the user rejects or corrects the expansion, this stage may repeat.
 
 ### Stage 3: Retrieval
+
 The retriever receives:
+
 - verbatim initial intent
 - approved restated intent
 - optional approved expanded spec
@@ -51,7 +58,9 @@ The retriever receives:
 The retriever returns a full `retrieval-index-v1` artifact.
 
 ### Stage 4: Evidence planning
+
 The conductor reads the retrieval artifact and decides:
+
 - which files/symbols/spans should be resolved
 - whether to include AST skeletons
 - whether to include retriever summaries
@@ -62,42 +71,54 @@ The conductor reads the retrieval artifact and decides:
 The conductor produces `evidence-plan-v1`.
 
 ### Stage 5: Deterministic evidence assembly
+
 The evidence assembler receives:
+
 - the full, unchanged retriever response
 - the conductor's `evidence-plan-v1`
 
 It deterministically resolves and stores an `evidence-bundle-v1`.
 
 ### Stage 6: Synthesis
+
 A synthesis model or batch receives:
+
 - intent artifacts
 - selected structural context
 - selected raw evidence
 - task-specific instructions
 
 It returns either:
+
 - `analysis-report-v1`
 - `change-spec-v1`
 - another output artifact
 
 ### Stage 7: Optional execution
+
 If the synthesis output is actionable code work:
+
 - a local execution agent receives the `change-spec-v1` and relevant evidence bundle
 - the agent edits the repo, validates, and reports results
 
 ### Stage 8: Recursive restart
+
 Any synthesis output may be promoted into a **new user intent**.
 When this happens, the system returns to **Stage 1** with:
+
 - a new verbatim user intent derived from the synthesis output
 - optional linkage to parent artifacts
 
 ## Intent expansion document inclusion rules
 
 ### Tagged files
+
 Any file explicitly tagged in the user's intent must be included in the expansion call.
 
 ### Untagged-intent project docs
+
 If the user did not tag any files and project docs exist, the user must be asked whether any or all of these should be included in the expansion prompt:
+
 - `README.md`
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -121,13 +142,13 @@ user intent
 
 ## Boundary summary
 
-| Component | Agentic | Can read raw repo code? | Can emit raw repo code? |
-|---|---:|---:|---:|
-| Conductor | Yes | No | No |
-| Retriever | Yes | Yes | No direct raw-source return to conductor |
-| Evidence Assembler | No | Yes, deterministically | Yes, only into bundle/output store |
-| Synthesizer | Yes | Yes, via assembled bundle only | Yes |
-| Executor | Yes | Yes | Yes |
+| Component          | Agentic |        Can read raw repo code? |                  Can emit raw repo code? |
+| ------------------ | ------: | -----------------------------: | ---------------------------------------: |
+| Conductor          |     Yes |                             No |                                       No |
+| Retriever          |     Yes |                            Yes | No direct raw-source return to conductor |
+| Evidence Assembler |      No |         Yes, deterministically |       Yes, only into bundle/output store |
+| Synthesizer        |     Yes | Yes, via assembled bundle only |                                      Yes |
+| Executor           |     Yes |                            Yes |                                      Yes |
 
 ## Related documents
 

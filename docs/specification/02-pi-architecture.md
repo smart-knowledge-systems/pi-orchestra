@@ -13,7 +13,9 @@ Use a hybrid architecture:
 ## High-level components
 
 ### 1. Conductor session
+
 A pi session whose model is only allowed to:
+
 - restate intent
 - request optional expansion
 - trigger retrieval
@@ -21,18 +23,23 @@ A pi session whose model is only allowed to:
 - dispatch synthesis/execution steps
 
 ### 2. Retriever agent
+
 A local tool-using agent with read/search powers.
 
 ### 3. Intent spec expander
+
 A slow-cheap batch or async task that expands approved restated intent.
 
 ### 4. Evidence assembler service
+
 A deterministic resolver with no model calls.
 
 ### 5. Synthesizer
+
 A slow-cheap batch or stronger model that consumes evidence bundles.
 
 ### 6. Local execution agent
+
 A normal tool-calling agent for repo modifications.
 
 ## Conductor tool boundary
@@ -66,10 +73,12 @@ Do not expose:
 ## Retriever agent configuration
 
 ### Recommended model
+
 - local, tool-capable model
 - likely `openai-codex/gpt-5.3-codex-spark`
 
 ### Allowed tools
+
 - `read`
 - `bash`
 - `grep`
@@ -77,6 +86,7 @@ Do not expose:
 - `ls`
 
 ### Retriever responsibilities
+
 - semantic discovery via `cidx --llm`
 - lexical verification
 - file and symbol summarization
@@ -85,6 +95,7 @@ Do not expose:
 - recommended expansion judgments
 
 ### Retriever non-responsibilities
+
 - repo modification
 - emitting raw source to the conductor
 - final user-facing synthesis unless explicitly requested
@@ -92,14 +103,18 @@ Do not expose:
 ## Intent expansion behavior
 
 ### Inputs
+
 Expansion receives:
+
 - `user_intent_verbatim`
 - `approved_restated_intent`
 - all user-tagged files
 - optionally selected project docs
 
 ### Project-doc prompt inclusion
+
 If `tagged_files.length === 0` and any of the following exist:
+
 - `README.md`
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -107,6 +122,7 @@ If `tagged_files.length === 0` and any of the following exist:
 then the user must be asked whether any/all should be included in the expansion prompt.
 
 ### Output
+
 - `intent-spec-v1`
 - user review required before retrieval dispatch
 
@@ -116,16 +132,19 @@ The evidence assembler is not a tool the conductor uses to read code.
 It is a deterministic service invoked through an explicit API.
 
 ### Inputs
+
 - full `retrieval-index-v1`, unchanged
 - `evidence-plan-v1`
 
 ### Outputs
+
 - `evidence-bundle-v1`
 - bundle metadata
 - stats / size estimates
 - optional preview information
 
 ### Hard constraints
+
 - no model calls
 - no heuristic expansion beyond declared plan
 - no omission of required requested sections unless budget rules explicitly require deterministic truncation
@@ -136,6 +155,7 @@ It is a deterministic service invoked through an explicit API.
 Use a deterministic artifact store keyed by `artifact_id`.
 
 ### Suggested stored artifact classes
+
 - intent artifacts
 - retrieval artifacts
 - evidence plans
@@ -145,6 +165,7 @@ Use a deterministic artifact store keyed by `artifact_id`.
 - recursive intents
 
 ### Access patterns
+
 - conductor sees artifact metadata and text-safe artifacts
 - raw evidence bundles are visible to synthesis and execution layers
 - conductor should not be fed raw bundle contents back into model context
@@ -156,6 +177,7 @@ Use a deterministic artifact store keyed by `artifact_id`.
 Expands approved restated intent via slow-cheap processing.
 
 ### Input
+
 ```json
 {
   "intent_capture_id": "intent_001",
@@ -165,6 +187,7 @@ Expands approved restated intent via slow-cheap processing.
 ```
 
 ### Output
+
 ```json
 {
   "intent_spec_id": "spec_001",
@@ -177,6 +200,7 @@ Expands approved restated intent via slow-cheap processing.
 Triggers retriever agent.
 
 ### Input
+
 ```json
 {
   "intent_capture_id": "intent_001",
@@ -186,6 +210,7 @@ Triggers retriever agent.
 ```
 
 ### Output
+
 ```json
 {
   "retrieval_index_id": "retrieval_001",
@@ -198,6 +223,7 @@ Triggers retriever agent.
 Creates or previews an evidence bundle from the full retriever response and a declarative selection plan.
 
 ### Input
+
 ```json
 {
   "mode": "preview",
@@ -209,9 +235,7 @@ Creates or previews an evidence bundle from the full retriever response and a de
         "include_ast_skeleton": true,
         "include_retriever_summary": true,
         "include_entire_file": false,
-        "spans": [
-          { "symbol_id": "s1", "include_span": true, "neighbor_lines": 8 }
-        ]
+        "spans": [{ "symbol_id": "s1", "include_span": true, "neighbor_lines": 8 }]
       }
     ],
     "include_cross_file_findings": true,
@@ -224,6 +248,7 @@ Creates or previews an evidence bundle from the full retriever response and a de
 ```
 
 ### Output
+
 ```json
 {
   "status": "preview",
@@ -239,6 +264,7 @@ Creates or previews an evidence bundle from the full retriever response and a de
 ```
 
 ### Materialize output
+
 ```json
 {
   "status": "materialized",
@@ -249,6 +275,7 @@ Creates or previews an evidence bundle from the full retriever response and a de
 ```
 
 ### Critical behavior
+
 The full retriever response must be passed through unchanged. The `plan` controls deterministic resolution/injection only.
 
 ## 4. `synthesis_dispatch`
@@ -256,6 +283,7 @@ The full retriever response must be passed through unchanged. The `plan` control
 Runs a synthesis task against an evidence bundle.
 
 ### Input
+
 ```json
 {
   "task_type": "change-spec",
@@ -268,6 +296,7 @@ Runs a synthesis task against an evidence bundle.
 ```
 
 ### Output
+
 ```json
 {
   "status": "completed",
@@ -281,6 +310,7 @@ Runs a synthesis task against an evidence bundle.
 Delegates `change-spec-v1` to a local editing agent.
 
 ### Input
+
 ```json
 {
   "change_spec_id": "change_001",
@@ -293,6 +323,7 @@ Delegates `change-spec-v1` to a local editing agent.
 ```
 
 ### Output
+
 ```json
 {
   "status": "completed",
@@ -305,6 +336,7 @@ Delegates `change-spec-v1` to a local editing agent.
 Promotes a synthesis artifact into a new verbatim user intent and restarts Stage 1.
 
 ### Input
+
 ```json
 {
   "source_artifact_type": "analysis-report-v1",
@@ -314,6 +346,7 @@ Promotes a synthesis artifact into a new verbatim user intent and restarts Stage
 ```
 
 ### Output
+
 ```json
 {
   "recursive_intent_id": "recur_001",
@@ -368,6 +401,7 @@ These sections are then injected into downstream prompts by `synthesis_dispatch`
 ## User-facing interactive flow in pi
 
 ### Phase A: intent loop
+
 Implemented by extension commands / input interception.
 
 1. User submits intent
@@ -377,6 +411,7 @@ Implemented by extension commands / input interception.
 5. User reviews expansion
 
 ### Phase B: retrieval + evidence + synthesis
+
 After approval:
 
 1. Retrieval dispatched
