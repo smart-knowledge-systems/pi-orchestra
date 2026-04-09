@@ -479,7 +479,7 @@
       "dependencies": [
         "P4-T5"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Only requested bundle sections are included",
         "Fixture snapshot test for prompt shape passes",
@@ -503,7 +503,7 @@
       "dependencies": [
         "P5-T2"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Integration test from stored bundle to stored synthesis artifact for both task types",
         "Malformed worker output is rejected with clear errors",

@@ -263,3 +263,21 @@ All three active tasks are complete. **260 tests pass, 0 failures, typecheck cle
 ### Also modified
 - **`tests/assembler/budget.test.ts`** — Updated one test from `not_implemented` to `error` for materialize mode (since it's now implemented).
 - **`implementation-tasks.json`** — P4-T4, P4-T5, P4-T6 marked completed.
+
+===== 2026-04-09T20:57:36Z | opus implement =====
+Both tasks are complete. **294 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P5-T2: Synthesis prompt assembly
+- **`src/synthesis/prompt.ts`** — `assembleSynthesisPrompt()` takes an `EvidenceBundleV1` and options specifying which sections to include (`intent_context`, `structural_context`, `raw_evidence`). Renders each section deterministically in a fixed order. Includes task-type-specific output format directives. Never references files outside the bundle.
+- **`tests/synthesis/prompt.test.ts`** — 16 tests: section inclusion/exclusion, intent context rendering (with/without spec), structural context with files/skeletons/symbols/cross-file findings, raw evidence with code fences, output directives for both task types, instructions section, determinism across calls, section ordering, prompt shape snapshot, and no-external-file-reference verification.
+
+### P5-T3: Synthesis worker and output validation
+- **`src/synthesis/worker.ts`** — `runSynthesisWorker()` produces `analysis-report-v1` or `change-spec-v1` from a bundle (deterministic stub for now). `validateWorkerOutput()` checks artifact_type match and schema validation, throwing `SynthesisValidationError` with structured errors on failure.
+- **`src/services/synthesis-dispatch.ts`** — Replaced stub with real implementation: loads bundle from store, assembles prompt, runs worker, validates output, stores only after validation. Returns clear errors for missing bundles or validation failures.
+- **`tests/synthesis/dispatch.test.ts`** — 7 tests: integration from stored bundle to stored artifact for both task types, missing bundle error, schema validation for both types, bundle ID reference integrity, edit paths from bundle.
+- **`tests/synthesis/output-validation.test.ts`** — 11 tests: valid acceptance for both types, null/non-object rejection, wrong artifact_type rejection, missing field rejection for both types, non-string array rejection, clear error messages, SynthesisValidationError structure.
+
+### Files modified
+- `implementation-tasks.json` — P5-T2 and P5-T3 marked completed
