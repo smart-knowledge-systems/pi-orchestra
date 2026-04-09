@@ -1150,3 +1150,36 @@ The highest-value early implementation sequence is:
 6. execution + recursive restart
 
 That sequence preserves the spec’s core architectural boundaries while keeping each phase independently testable and usable.
+
+---
+
+## 13. Detailed task breakdown for Phases 3–6
+
+The initial `implementation-tasks.json` carried a single umbrella task per phase for P3–P6. This section decomposes each of those phases into concrete, independently pickable tasks so the auto-implement loop can make forward progress in small coherent batches. The original umbrella IDs (P3-T1, P4-T1, P5-T1, P6-T1) remain in place and are considered satisfied by the combined completion of their phase siblings.
+
+### Phase 3 — retrieval
+
+- **P3-T2 — Retriever worker prompt and config.** Author the retriever system prompt (`src/retriever/prompt.ts`) and worker entrypoint (`src/retriever/worker.ts`). The worker runs repo reads/searches behind a boundary the conductor cannot cross. It accepts `{ intent_capture_id, intent_restatement_id, intent_spec_id? }` and emits a draft result for normalization. Acceptance: worker is reached only through `retrieval_dispatch`; conductor code cannot import worker internals; fixture-based prompt assembler test.
+- **P3-T3 — Symbol and span metadata extractor.** Implement `src/retriever/symbol-extractor.ts` producing function/class symbol ranges with 1-indexed lines and absolute paths, plus a lightweight AST skeleton. Acceptance: deterministic output on a fixture repo slice; normalized absolute paths; unit tests for symbol start/count and span formatting.
+- **P3-T4 — Retrieval normalization, conductor inspection API, and stage wiring.** Finish `src/retriever/normalize.ts` and add `src/conductor/retrieval.ts` plus an `artifact_inspect` API (text-safe reads of stored artifacts) so worker output becomes a valid `retrieval-index-v1` containing only structural fields (summaries, symbols, gaps, followups) with no raw source payload. Wire the stage machine to permit retrieval only after an approved restatement. Acceptance: golden test that the normalized artifact contains no raw file content; `artifact_inspect` cannot return raw bundle payloads; schema validation passes; stage-machine transition test.
+
+### Phase 4 — evidence planning and deterministic assembler
+
+- **P4-T2 — Span utilities.** Implement `src/util/spans.ts`: neighbor-line expansion, deterministic overlap merge, and symbol-to-span resolution against a `retrieval-index-v1`. Acceptance: pure functions, no I/O; unit tests cover merge determinism, neighbor math, and rejection of unknown file/symbol IDs.
+- **P4-T3 — Budget utilities and preview mode.** Implement `src/util/budget.ts` with line/token estimates and the `evidence_prepare` preview mode returning stable estimates without materializing raw evidence. Acceptance: preview determinism test; over-budget reports surface structured reasons rather than silent pruning.
+- **P4-T4 — Evidence plan authoring helpers.** Implement `src/conductor/evidence-plan.ts` so the conductor can produce a valid `evidence-plan-v1` that **embeds the full `retrieval-index-v1` unchanged** and declares per-file inclusion controls (`include_ast_skeleton`, `include_retriever_summary`, `include_entire_file`, `spans[]`) plus cross-file/gap/followup selections and `assembly_options`. Acceptance: plan round-trips through schema validation; the embedded retrieval index is byte-equal to the stored source; fixture-based authoring test.
+- **P4-T5 — Deterministic assembler materialize mode.** Finish `src/services/evidence-assembler.ts` so materialize mode reads the authoritative retrieval artifact plus repo disk state and emits a valid `evidence-bundle-v1` with canonical sections (`intent_context`, `structural_context`, `raw_evidence`, `assembly_notes`). Acceptance: same plan + same retrieval + same repo → byte-identical bundle; assembler refuses unknown IDs; bundle contents match plan exactly.
+- **P4-T6 — Determinism and boundary test suite.** Add `tests/assembler/*` covering determinism, budget enforcement, neighbor/overlap behavior, and negative selection boundary tests. Acceptance: test suite green and covers the boundary contracts enumerated in Phase 4.
+
+### Phase 5 — synthesis dispatch
+
+- **P5-T2 — Synthesis prompt assembly.** Implement `src/synthesis/prompt.ts` to assemble deterministic prompt sections from a stored `evidence-bundle-v1` without free-form context mixing. Acceptance: only requested bundle sections are included; fixture snapshot test for prompt shape.
+- **P5-T3 — Synthesis worker and output validation.** Implement `src/synthesis/worker.ts` plus `src/services/synthesis-dispatch.ts`, selecting `analysis-report-v1` or `change-spec-v1` by `task_type` and validating worker output before storing. Acceptance: integration test from stored bundle to stored synthesis artifact for both task types; malformed output is rejected cleanly.
+- **P5-T4 — Conductor synthesis task-type selection and rendering.** Extend `src/conductor/synthesis.ts` with heuristic selection (explanation → analysis-report, execution handoff → change-spec) and a user-facing result renderer that never exposes raw bundle content. Acceptance: stage-machine test for task-type selection; rendering excludes raw evidence fields.
+
+### Phase 6 — execution dispatch and recursive restart
+
+- **P6-T2 — Execution worker with safety constraints.** Implement `src/execution/worker.ts` and `src/services/execution-dispatch.ts` with required `allow_edits` and `run_validation` flags. Acceptance: execution is blocked unless constraints explicitly allow edits; unit tests cover flag enforcement.
+- **P6-T3 — Execution report persistence.** Wire the worker to produce `execution-report-v1` capturing modified files and validation command results. Acceptance: integration test from a `change-spec-v1` fixture to a stored valid execution report.
+- **P6-T4 — Artifact promotion to recursive intent.** Implement `src/services/artifact-promote.ts` and `src/conductor/recursive-intent.ts` producing `recursive-intent-v1` with lineage references back to the source synthesis artifact. Acceptance: lineage fields point at the source artifact ID and type; schema validation passes.
+- **P6-T5 — Session restart flow from promotion.** Reset the stage machine to Stage 1 when a recursive intent is created, preserving prior lineage in session metadata. Acceptance: protocol test that promotion restarts at Stage 1 with the new verbatim intent and that prior artifact IDs remain traceable.

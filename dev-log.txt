@@ -1,0 +1,207 @@
+
+===== 2026-04-09T19:40:11Z | opus implement =====
+All three active tasks are complete. Here's what was done:
+
+### P1-T1: Create artifact module scaffold
+- **`src/artifacts/types.ts`** — Discriminated union of all 11 v1 artifact types with `artifact_type` as the discriminant field. Includes `ArtifactOfType<T>` helper for typed lookups.
+- **`src/artifacts/index.ts`** — Re-exports all types, ID helpers, and validators.
+
+### P1-T2: Implement runtime schema validation
+- **`src/artifacts/schemas.ts`** — Runtime validators for every v1 artifact type. `validateArtifact()` dispatches by `artifact_type` and returns `{valid, errors}` with field-level error messages.
+- **`tests/artifacts/schemas.test.ts`** — 24 tests: happy-path fixture validation for all 11 types, registry completeness check, and 12 invalid-shape rejection tests with clear error messages.
+- **`tests/fixtures/sample-artifacts/*.json`** — 11 fixture files, one per artifact type, derived from spec examples.
+
+### P1-T3: Build artifact ID and path helpers
+- **`src/artifacts/ids.ts`** — `generateArtifactId(type)` produces `<prefix>_<timestamp>_<counter>` IDs. `artifactTypePrefix(type)` returns the short prefix.
+- **`src/runtime/config.ts`** — `createConfig(repoRoot)` builds deterministic paths for `.pi/`, `.pi/artifacts/`, and `.pi/session-state.json`.
+- **`src/runtime/paths.ts`** — `artifactDirPath()` and `artifactFilePath()` map artifact types to stable subdirectories (`intents/`, `retrieval/`, `evidence-plans/`, `evidence-bundles/`, `synthesis/`, `execution/`).
+
+### Also modified
+- **`tsconfig.json`** — Added `src/**/*.ts` and `tests/**/*.ts` to `include`.
+
+All 24 tests pass, typecheck is clean, no compilation errors.
+
+===== 2026-04-09T19:48:35Z | opus implement =====
+All three active tasks (P1-T1, P1-T2, P1-T3) are already complete:
+
+- **24 tests pass**, 0 failures
+- **Typecheck is clean** — no compilation errors
+- All deliverable files exist:
+  - `src/artifacts/types.ts`, `src/artifacts/index.ts` (T1)
+  - `src/artifacts/schemas.ts`, `tests/artifacts/schemas.test.ts`, 11 fixture JSON files (T2)
+  - `src/artifacts/ids.ts`, `src/runtime/paths.ts`, `src/runtime/config.ts` (T3)
+
+These tasks were implemented in the previous session (per the dev-log entry). No further work is needed — the repo is in a coherent state ready for P1-T4 (artifact store), P1-T5 (session state), and subsequent tasks.
+
+===== 2026-04-09T20:15:00Z | opus implement =====
+All three active tasks (P1-T4, P1-T5, P1-T6) are complete.
+
+### P1-T4: Implement artifact store
+- **`src/artifacts/store.ts`** — `ArtifactStore` class with `put()`, `get()`, `exists()`, `listByType()`. Validates on write, type-checks on read, creates directories on demand.
+- **`tests/artifacts/store.test.ts`** — 10 tests: put/get round-trip, null for missing, rejects invalid, type mismatch on get, exists checks, listByType with filtering across shared subdirectories, multi-type independence.
+- **`src/artifacts/index.ts`** — Added store re-export.
+
+### P1-T5: Add session state model
+- **`src/runtime/session-state.ts`** — `SessionState` type with stage, artifact pointers, lineage history. Pure helpers: `createSessionState()`, `transitionStage()`, `setArtifactPointer()`, `resetSession()`. Persistence: `saveSessionState()`, `loadSessionState()`, `loadOrCreateSessionState()`.
+- **`tests/artifacts/session-state.test.ts`** — 13 tests: initialization, stage transitions with lineage, artifact pointer immutability, reset preserving lineage, save/load round-trip, loadOrCreate behavior.
+
+### P1-T6: Create conductor stage-machine skeleton
+- **`src/conductor/stage-machine.ts`** — `StageMachine` class wrapping session state with valid-transition enforcement. Exposes `currentStage`, `canTransition()`, `transition()`, `setArtifact()`, `reset()`. Persists to disk on every mutation.
+- **`src/conductor/prompts.ts`** — Centralized prompt constants for all 6 stages plus recursive restart. No raw repo-read capability in conductor logic.
+
+All 47 tests pass (23 new + 24 existing), typecheck is clean.
+
+===== 2026-04-09T19:53:17Z | opus implement =====
+All three active tasks are complete. Here's the summary:
+
+### P1-T4: Artifact store
+- **`src/artifacts/store.ts`** — `ArtifactStore` with `put()`, `get()`, `exists()`, `listByType()`. Validates on write, enforces type on read, auto-creates directories.
+- **`tests/artifacts/store.test.ts`** — 10 tests covering round-trips, missing artifacts, validation rejection, type mismatch, shared-subdir filtering.
+
+### P1-T5: Session state model
+- **`src/runtime/session-state.ts`** — Immutable `SessionState` with stage, artifact pointers, and lineage history. Pure helpers for transitions, pointer updates, and reset. Disk persistence via `save`/`load`/`loadOrCreate`.
+- **`tests/artifacts/session-state.test.ts`** — 13 tests covering initialization, transitions, lineage preservation, reset, and save/load round-trips.
+
+### P1-T6: Conductor stage-machine skeleton
+- **`src/conductor/stage-machine.ts`** — `StageMachine` wrapping session state with valid-transition enforcement (`idle -> restatement -> expansion|retrieval -> ...`). Persists on every mutation. No raw repo-read capability.
+- **`src/conductor/prompts.ts`** — Centralized prompt constants for all stages.
+
+**47 tests pass, 0 failures, typecheck clean.** No unfinished work — P1-T7 and P1-T8 are now unblocked.
+
+===== 2026-04-09T20:30:00Z | opus implement =====
+Both active tasks (P1-T7, P1-T8) are complete.
+
+### P1-T7: Replace no-op extension bootstrap
+- **`extensions/conductor-extension.ts`** — Now initializes `PiOrchestraConfig`, `ArtifactStore`, and `StageMachine` on boot. Stashes references on the extension context for later phases. No raw repo file tools (read, bash, find, grep, ls, edit, write) are exposed.
+
+### P1-T8: Add stub service contracts
+- **`src/services/intent-expand.ts`** — `intentExpand()` with typed `IntentExpandInput`/`IntentExpandResult`. Returns `not_implemented`.
+- **`src/services/retrieval-dispatch.ts`** — `retrievalDispatch()` with typed input/result. Returns `not_implemented`.
+- **`src/services/evidence-assembler.ts`** — `evidenceAssemble()` with preview/materialize modes. Returns `not_implemented`.
+- **`src/services/synthesis-dispatch.ts`** — `synthesisDispatch()` with task type (analysis-report | change-spec). Returns `not_implemented`.
+- **`src/services/execution-dispatch.ts`** — `executionDispatch()` with execution constraints. Returns `not_implemented`.
+- **`src/services/artifact-promote.ts`** — `artifactPromote()` for recursive intent creation. Returns `not_implemented`.
+
+**47 tests pass, 0 failures, typecheck clean.** Phase 1 is now feature-complete.
+
+===== 2026-04-09T20:05:46Z | opus implement =====
+Both tasks are done. Here's what changed:
+
+### P1-T7: Replace no-op extension bootstrap
+- **`extensions/conductor-extension.ts`** — Initializes `PiOrchestraConfig`, `ArtifactStore`, and `StageMachine` on boot. Stashes runtime references on the extension context. No raw repo file tools are exposed through the conductor bootstrap.
+
+### P1-T8: Add stub service contracts
+Six new files under `src/services/`:
+- **`intent-expand.ts`** — `IntentExpandInput` / `IntentExpandResult` contract
+- **`retrieval-dispatch.ts`** — `RetrievalDispatchInput` / `RetrievalDispatchResult` contract
+- **`evidence-assembler.ts`** — `EvidenceAssemblerInput` with preview/materialize modes
+- **`synthesis-dispatch.ts`** — `SynthesisDispatchInput` with analysis-report/change-spec task types
+- **`execution-dispatch.ts`** — `ExecutionDispatchInput` with execution constraints
+- **`artifact-promote.ts`** — `ArtifactPromoteInput` for recursive intent creation
+
+All stubs return explicit `{ status: 'not_implemented', message: '...' }` results. All 47 existing tests pass, typecheck is clean. No unfinished work.
+
+===== 2026-04-09T20:11:52Z | opus implement =====
+Both tasks are complete. Here's the summary:
+
+### P1-T9: Add test runner and package scripts
+- **`package.json`** — Added `"test": "bun test"` script. `npm test` / `bun test` now runs the full suite.
+- **`.github/workflows/ci.yml`** — Added `test` job that installs Bun, runs typecheck, and runs tests in CI.
+
+### P2-T1: Implement Stage 1 intent capture and restatement loop
+- **`src/conductor/stage-1.ts`** — `Stage1Controller` class implementing the full Stage 1 flow:
+  - `captureIntent()` — captures verbatim intent → persists `intent-capture-v1`, transitions to `restatement` stage
+  - `produceRestatement()` — emits canonical restatement message shape via injected `RestateFunction`
+  - `submitApproval()` — approval loop with turn tracking; corrections create new immutable captures
+  - `getExpansionOffer()` — canonical expansion yes/no message
+  - `finalize()` — persists approved `intent-restatement-v1`, transitions to `expansion` or `retrieval`
+  - `isRetrievalAllowed()` — gate function ensuring retrieval cannot proceed without approved restatement
+- **`tests/interaction/stage-1.test.ts`** — 23 tests covering:
+  - Intent capture and persistence
+  - Canonical restatement message shape
+  - Approval/correction loop with turn tracking
+  - Tagged file preservation across corrections
+  - Expansion offer message shape
+  - Finalization with expansion/no-expansion transitions
+  - Retrieval gate enforcement
+  - End-to-end flow (capture → correct → approve → finalize)
+
+**70 tests pass, 0 failures, typecheck clean.** No unfinished work.
+
+===== 2026-04-09T20:16:56Z | opus implement =====
+Both tasks are complete. **91 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P2-T1: Stage 1 intent capture and restatement loop
+Already implemented from a previous session. Verified: 23 stage-1 tests pass, all acceptance criteria met.
+
+### P2-T2: Expansion inclusion protocol
+Three new files created:
+
+- **`src/util/project-docs.ts`** — Discovers `README.md`, `AGENTS.md`, `CLAUDE.md` at repo root. Returns only files that exist on disk.
+- **`src/conductor/expansion.ts`** — `ExpansionController` class implementing the full expansion flow:
+  - `checkProjectDocInclusion()` — returns inclusion question only when no tagged files and project docs exist
+  - `createExpansionInput()` — auto-includes tagged files with `"user-tagged"` reason; includes selected project docs with `"project-doc-included"` reason; persists `expansion-input-v1`
+  - `runExpansion()` — runs injected `ExpandFunction` and returns canonical review message
+  - `submitReview()` — handles approve (persists `intent-spec-v1`, transitions to retrieval), revise (creates new expansion input, re-runs), and reject (transitions to retrieval without spec)
+- **`tests/interaction/expansion-protocol.test.ts`** — 21 tests covering:
+  - Project-doc inclusion question appears only when required
+  - Tagged files auto-included; project docs ignored when tagged files exist
+  - Expansion input persistence and session state updates
+  - Approve/revise/reject review outcomes with correct state transitions
+  - End-to-end flows for tagged-file path, project-doc path, and revise→approve cycle
+
+No unfinished work. Both tasks meet all acceptance criteria.
+
+===== 2026-04-09T20:25:08Z | opus implement =====
+P3-T1 is complete. Here's the summary:
+
+## P3-T1: Implement retrieval dispatch and normalization
+
+### Files created
+- **`src/retriever/normalize.ts`** — Normalizes raw retriever output into `retrieval-index-v1`. Converts relative paths to absolute, clamps line numbers to 1-indexed minimum, strips `raw_content` to prevent raw source leaking to the conductor, assigns stable file/symbol IDs when missing, and validates the final artifact.
+
+- **`src/retriever/worker.ts`** — Retriever worker boundary that inspects the repository. Discovers source files (skipping `node_modules`, `.git`, etc.), extracts symbols via regex-based pattern matching, generates lightweight AST skeletons, scores files by keyword relevance, and returns structured output without `raw_content`.
+
+- **`tests/retriever/retrieval-index.test.ts`** — 18 tests covering:
+  - Normalization produces valid `retrieval-index-v1` schema
+  - Relative paths converted to absolute; absolute paths preserved
+  - Line numbers clamped to minimum 1
+  - `raw_content` stripped — no raw payload in output
+  - File/symbol ID generation and preservation
+  - Optional field defaults
+  - Worker file discovery, symbol extraction, directory skipping
+  - Conductor boundary enforcement (no raw source in artifact)
+  - Integration: dispatch creates stored artifact from approved intent
+
+### Files modified
+- **`src/services/retrieval-dispatch.ts`** — Replaced stub with real implementation that loads intent artifacts, runs the worker, normalizes output, and persists the `retrieval-index-v1` artifact.
+
+### Acceptance criteria met
+- Retriever output validates as `retrieval-index-v1`
+- Paths are absolute and line numbers are 1-indexed
+- No raw full-file payload is surfaced to conductor-safe retrieval fields
+
+**109 tests pass, 0 failures, typecheck clean.**
+
+===== 2026-04-09T20:32:57Z | opus implement =====
+All three tasks are complete. **151 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P3-T2: Retriever worker prompt and config
+- **`src/retriever/prompt.ts`** — Retriever system prompt constant and `assembleRetrieverPrompt()` that builds the query from restated intent, retrieval focus hints, and tagged files.
+- **`tests/retriever/prompt.test.ts`** — 13 tests: system prompt content assertions, prompt assembly with/without focus and tagged files, determinism, empty-array handling, conductor boundary.
+- **`src/services/retrieval-dispatch.ts`** — Updated to wire the prompt assembler into the dispatch path so the worker is reached only via `retrieval_dispatch`.
+
+### P3-T3: Symbol and span metadata extractor
+- **`src/retriever/symbol-extractor.ts`** — `extractSymbols()` extracts function/class/interface/type/const ranges with 1-indexed lines and absolute paths, plus `generateAstSkeleton()` for lightweight AST skeletons. Rejects relative paths.
+- **`tests/retriever/symbol-extractor.test.ts`** — 15 tests: all symbol kinds extracted, correct kinds assigned, 1-indexed lines, absolute paths enforced, unique IDs, start/count coverage, class spanning, determinism, empty/no-symbol content, AST skeleton content and truncation.
+- **`tests/fixtures/retriever/sample-source.ts`** — Fixture with imports, consts, types, interfaces, functions, and classes.
+
+### P3-T4: Retrieval normalization, artifact_inspect API, and stage wiring
+- **`src/services/artifact-inspect.ts`** — `artifactInspect()` returns text-safe structural data for `retrieval-index-v1` and refuses raw bundle payloads (`evidence-bundle-v1`).
+- **`src/conductor/retrieval.ts`** — `canStartRetrieval()` gate (checks stage + approved restatement) and `inspectRetrievalResult()` for conductor-safe retrieval inspection.
+- **`tests/retriever/normalize.test.ts`** — 5 tests: golden test for no raw content, schema validation, artifact_inspect refuses bundles, returns text-safe data, error on missing artifact.
+- **`tests/conductor/retrieval-stage.test.ts`** — 7 tests: blocks from idle, blocks without approval, allows with approval, blocks from evidence, allows from expansion, inspect returns data, inspect error on missing.

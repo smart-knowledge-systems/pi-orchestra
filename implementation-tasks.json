@@ -274,7 +274,7 @@
         "P2-T2",
         "P1-T8"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Retriever output validates as retrieval-index-v1",
         "Paths are absolute and line numbers are 1-indexed",
@@ -282,76 +282,345 @@
       ]
     },
     {
-      "id": "P4-T1",
-      "sprint": "Sprint 4",
-      "phase": 4,
-      "title": "Implement evidence plan and deterministic assembler",
+      "id": "P3-T2",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Retriever worker prompt and config",
       "scope": "short",
-      "description": "Add conductor evidence-plan generation and deterministic preview/materialize assembly into evidence-bundle-v1.",
-      "deliverable": "Evidence planning plus deterministic evidence bundle materialization",
+      "description": "Author the retriever system prompt and worker entrypoint. Worker runs repo reads/searches behind a boundary the conductor cannot cross; accepts intent artifact IDs and emits a draft result for normalization.",
+      "deliverable": "src/retriever/prompt.ts and src/retriever/worker.ts with fixture-backed prompt assembler test",
       "files": [
-        "src/conductor/evidence-plan.ts",
-        "src/services/evidence-assembler.ts",
-        "src/util/spans.ts",
-        "src/util/budget.ts",
-        "tests/assembler/evidence-assembler.test.ts"
+        "src/retriever/prompt.ts",
+        "src/retriever/worker.ts",
+        "tests/retriever/prompt.test.ts"
       ],
       "dependencies": [
         "P3-T1"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "acceptance_criteria": [
-        "Preview returns stable estimates",
-        "Materialize returns valid evidence-bundle-v1",
-        "Assembler includes only what the plan requested"
+        "Worker is reached only via retrieval_dispatch",
+        "Conductor code cannot import worker internals",
+        "Fixture-based prompt assembler test passes"
       ]
     },
     {
-      "id": "P5-T1",
+      "id": "P3-T3",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Symbol and span metadata extractor",
+      "scope": "short",
+      "description": "Extract function/class symbol ranges with 1-indexed lines and absolute paths, plus a lightweight AST skeleton, for retriever output.",
+      "deliverable": "src/retriever/symbol-extractor.ts with deterministic fixture tests",
+      "files": [
+        "src/retriever/symbol-extractor.ts",
+        "tests/retriever/symbol-extractor.test.ts",
+        "tests/fixtures/retriever/"
+      ],
+      "dependencies": [
+        "P3-T2"
+      ],
+      "status": "completed",
+      "acceptance_criteria": [
+        "Deterministic output on a fixture repo slice",
+        "All paths are absolute and line numbers are 1-indexed",
+        "Symbol start/count and AST skeleton are unit-tested"
+      ]
+    },
+    {
+      "id": "P3-T4",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Retrieval normalization, artifact_inspect API, and stage wiring",
+      "scope": "short",
+      "description": "Normalize worker output into retrieval-index-v1, expose a text-safe artifact_inspect API for the conductor, and wire the stage machine to permit retrieval only after an approved restatement.",
+      "deliverable": "Valid retrieval-index-v1 production with conductor-safe inspection path",
+      "files": [
+        "src/retriever/normalize.ts",
+        "src/conductor/retrieval.ts",
+        "src/services/artifact-inspect.ts",
+        "tests/retriever/normalize.test.ts",
+        "tests/conductor/retrieval-stage.test.ts"
+      ],
+      "dependencies": [
+        "P3-T3"
+      ],
+      "status": "completed",
+      "acceptance_criteria": [
+        "Golden test that normalized artifact contains no raw file content",
+        "artifact_inspect refuses raw bundle payloads",
+        "Schema validation passes for normalized retrieval-index-v1",
+        "Stage-machine blocks retrieval without approved restatement"
+      ]
+    },
+    {
+      "id": "P4-T2",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Span utilities",
+      "scope": "short",
+      "description": "Neighbor-line expansion, deterministic overlap merge, and symbol-to-span resolution against a retrieval-index-v1.",
+      "deliverable": "src/util/spans.ts with determinism and negative-path tests",
+      "files": [
+        "src/util/spans.ts",
+        "tests/assembler/spans.test.ts"
+      ],
+      "dependencies": [
+        "P3-T4"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Pure functions, no I/O",
+        "Deterministic overlap merge covered by tests",
+        "Unknown file/symbol IDs are rejected"
+      ]
+    },
+    {
+      "id": "P4-T3",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Budget utilities and evidence_prepare preview mode",
+      "scope": "short",
+      "description": "Line/token estimates and the evidence_prepare preview mode returning stable estimates without materializing raw evidence.",
+      "deliverable": "src/util/budget.ts plus preview path in evidence-assembler service",
+      "files": [
+        "src/util/budget.ts",
+        "src/services/evidence-assembler.ts",
+        "tests/assembler/budget.test.ts"
+      ],
+      "dependencies": [
+        "P4-T2"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Preview is deterministic across runs",
+        "Over-budget reports surface structured reasons, never silent pruning",
+        "Preview does not read raw file content"
+      ]
+    },
+    {
+      "id": "P4-T4",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Evidence plan authoring helpers",
+      "scope": "short",
+      "description": "Produce a valid evidence-plan-v1 from a retrieval-index-v1. Plan embeds the full retrieval index unchanged and declares per-file inclusion controls plus cross-file/gap/followup selections and assembly_options.",
+      "deliverable": "src/conductor/evidence-plan.ts with schema round-trip test",
+      "files": [
+        "src/conductor/evidence-plan.ts",
+        "tests/assembler/evidence-plan.test.ts"
+      ],
+      "dependencies": [
+        "P4-T3"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Plan validates against evidence-plan-v1 schema",
+        "Embedded retrieval index is byte-equal to the stored source",
+        "Per-file inclusion controls and assembly options are honored"
+      ]
+    },
+    {
+      "id": "P4-T5",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Deterministic assembler materialize mode",
+      "scope": "short",
+      "description": "Materialize mode reads the authoritative retrieval artifact plus repo disk state and emits a valid evidence-bundle-v1 with canonical sections (intent_context, structural_context, raw_evidence, assembly_notes).",
+      "deliverable": "Full materialize path in evidence-assembler with byte-identical determinism",
+      "files": [
+        "src/services/evidence-assembler.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": [
+        "P4-T4"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Same plan + retrieval + repo produces byte-identical bundle",
+        "Assembler refuses unknown file/symbol IDs",
+        "Bundle contents match plan exactly with no widening"
+      ]
+    },
+    {
+      "id": "P4-T6",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Determinism and boundary test suite",
+      "scope": "short",
+      "description": "Round out tests/assembler with determinism, budget enforcement, neighbor/overlap, and negative selection boundary cases.",
+      "deliverable": "Comprehensive assembler boundary test suite",
+      "files": [
+        "tests/assembler/determinism.test.ts",
+        "tests/assembler/boundaries.test.ts"
+      ],
+      "dependencies": [
+        "P4-T5"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Determinism test covers same-inputs-same-output",
+        "Boundary tests cover the Phase 4 contract",
+        "Suite runs green under bun test"
+      ]
+    },
+    {
+      "id": "P5-T2",
       "sprint": "Sprint 5",
       "phase": 5,
-      "title": "Implement synthesis dispatch",
+      "title": "Synthesis prompt assembly from bundle sections",
       "scope": "short",
-      "description": "Create synthesis prompt assembly and output validation for analysis-report-v1 and change-spec-v1.",
-      "deliverable": "Stored synthesis artifacts generated from evidence bundles",
+      "description": "Assemble deterministic prompt sections from a stored evidence-bundle-v1 without free-form context mixing.",
+      "deliverable": "src/synthesis/prompt.ts with fixture snapshot test",
       "files": [
-        "src/services/synthesis-dispatch.ts",
         "src/synthesis/prompt.ts",
+        "tests/synthesis/prompt.test.ts"
+      ],
+      "dependencies": [
+        "P4-T5"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Only requested bundle sections are included",
+        "Fixture snapshot test for prompt shape passes",
+        "Prompt never reaches back into raw source outside the bundle"
+      ]
+    },
+    {
+      "id": "P5-T3",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Synthesis worker and output validation",
+      "scope": "short",
+      "description": "Synthesis worker plus dispatch service. Select analysis-report-v1 or change-spec-v1 by task_type and validate worker output before storing.",
+      "deliverable": "src/synthesis/worker.ts and wired src/services/synthesis-dispatch.ts",
+      "files": [
         "src/synthesis/worker.ts",
+        "src/services/synthesis-dispatch.ts",
+        "tests/synthesis/dispatch.test.ts",
         "tests/synthesis/output-validation.test.ts"
       ],
       "dependencies": [
-        "P4-T1"
+        "P5-T2"
       ],
       "status": "planned",
       "acceptance_criteria": [
-        "Synthesis supports analysis-report and change-spec task types",
-        "Outputs are schema-validated before persistence",
-        "Prompt assembly uses deterministic bundle sections"
+        "Integration test from stored bundle to stored synthesis artifact for both task types",
+        "Malformed worker output is rejected with clear errors",
+        "Artifacts are stored only after validation"
       ]
     },
     {
-      "id": "P6-T1",
-      "sprint": "Sprint 6",
-      "phase": 6,
-      "title": "Implement execution dispatch and recursive restart",
+      "id": "P5-T4",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Conductor synthesis task-type selection and rendering",
       "scope": "short",
-      "description": "Add local execution from change-spec-v1, execution-report-v1 persistence, and synthesis artifact promotion to recursive-intent-v1 with restart at Stage 1.",
-      "deliverable": "Execution and recursive follow-up loop",
+      "description": "Extend the conductor with task-type heuristic selection (explanation -> analysis-report, execution handoff -> change-spec) and a user-facing result renderer that never exposes raw bundle content.",
+      "deliverable": "src/conductor/synthesis.ts with selection and rendering helpers",
       "files": [
-        "src/services/execution-dispatch.ts",
-        "src/services/artifact-promote.ts",
-        "src/conductor/recursive-intent.ts",
-        "tests/interaction/recursive-restart.test.ts"
+        "src/conductor/synthesis.ts",
+        "tests/conductor/synthesis-selection.test.ts"
       ],
       "dependencies": [
-        "P5-T1"
+        "P5-T3"
       ],
       "status": "planned",
       "acceptance_criteria": [
-        "Execution dispatch produces execution-report-v1",
-        "Promotion creates recursive-intent-v1",
-        "Promoted flows restart at Stage 1"
+        "Task-type selection is covered by stage-machine tests",
+        "Rendering excludes raw evidence fields",
+        "Conductor cannot surface raw source through synthesis results"
+      ]
+    },
+    {
+      "id": "P6-T2",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Execution worker with safety constraints",
+      "scope": "short",
+      "description": "Execution worker and dispatch service with required allow_edits and run_validation flags.",
+      "deliverable": "src/execution/worker.ts and src/services/execution-dispatch.ts with flag enforcement",
+      "files": [
+        "src/execution/worker.ts",
+        "src/services/execution-dispatch.ts",
+        "tests/execution/safety.test.ts"
+      ],
+      "dependencies": [
+        "P5-T3"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Execution is blocked unless allow_edits is true",
+        "run_validation default is covered by tests",
+        "Flag enforcement has explicit unit tests"
+      ]
+    },
+    {
+      "id": "P6-T3",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Execution report persistence",
+      "scope": "short",
+      "description": "Wire the execution worker to produce execution-report-v1 capturing modified files and validation command results.",
+      "deliverable": "Persisted execution-report-v1 and integration test",
+      "files": [
+        "src/execution/worker.ts",
+        "tests/execution/report.test.ts"
+      ],
+      "dependencies": [
+        "P6-T2"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Integration test from change-spec-v1 fixture to stored valid execution report",
+        "Modified files and validation commands are recorded",
+        "Report passes schema validation"
+      ]
+    },
+    {
+      "id": "P6-T4",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Artifact promotion to recursive intent",
+      "scope": "short",
+      "description": "Promote a synthesis artifact into a recursive-intent-v1 with lineage back to the source.",
+      "deliverable": "src/services/artifact-promote.ts and src/conductor/recursive-intent.ts",
+      "files": [
+        "src/services/artifact-promote.ts",
+        "src/conductor/recursive-intent.ts",
+        "tests/interaction/promotion.test.ts"
+      ],
+      "dependencies": [
+        "P5-T3"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "recursive-intent-v1 lineage fields point at source artifact id and type",
+        "Schema validation passes",
+        "Promotion API matches the spec shape"
+      ]
+    },
+    {
+      "id": "P6-T5",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Session restart flow from promotion",
+      "scope": "short",
+      "description": "Reset the stage machine to Stage 1 when a recursive intent is created, preserving prior lineage in session metadata. Implements the canonical promotion prompt.",
+      "deliverable": "Stage-1 restart behavior with lineage preservation",
+      "files": [
+        "src/conductor/recursive-intent.ts",
+        "src/conductor/stage-machine.ts",
+        "tests/interaction/recursive-restart.test.ts"
+      ],
+      "dependencies": [
+        "P6-T4"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Protocol test: promotion restarts at Stage 1 with new verbatim intent",
+        "Prior artifact IDs remain traceable in session metadata",
+        "Canonical promotion prompt shape matches spec section 11"
       ]
     }
   ]
