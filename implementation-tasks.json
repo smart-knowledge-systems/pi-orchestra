@@ -1,0 +1,358 @@
+{
+  "generated_at": "2026-04-09T18:40:01Z",
+  "project": "pi-orchestra",
+  "source_plan": "implementation-phase-1.md",
+  "tasks": [
+    {
+      "id": "P1-T1",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Create artifact module scaffold",
+      "scope": "short",
+      "description": "Create the src/artifacts module structure and export a discriminated union for all v1 artifact types from the specification.",
+      "deliverable": "Typed artifact definitions in src/artifacts/types.ts and src/artifacts/index.ts",
+      "files": [
+        "src/artifacts/types.ts",
+        "src/artifacts/index.ts"
+      ],
+      "dependencies": [],
+      "status": "planned",
+      "acceptance_criteria": [
+        "All v1 artifact types are represented in TypeScript",
+        "Artifacts share a common discriminant field for artifact_type",
+        "Modules compile without placeholder import errors"
+      ]
+    },
+    {
+      "id": "P1-T2",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Implement runtime schema validation",
+      "scope": "short",
+      "description": "Add runtime validators for each artifact shape so persisted artifacts can be validated on write and read.",
+      "deliverable": "Artifact schema validators with happy-path and invalid-shape coverage",
+      "files": [
+        "src/artifacts/schemas.ts",
+        "tests/artifacts/schemas.test.ts",
+        "tests/fixtures/sample-artifacts/"
+      ],
+      "dependencies": [
+        "P1-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Every v1 artifact has a validator",
+        "Invalid artifacts fail with clear errors",
+        "Spec-derived fixture examples validate successfully"
+      ]
+    },
+    {
+      "id": "P1-T3",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Build artifact ID and path helpers",
+      "scope": "short",
+      "description": "Implement ID generation helpers and deterministic path mapping from artifact type to .pi/artifacts storage directories.",
+      "deliverable": "Reusable ID generator and artifact path utility layer",
+      "files": [
+        "src/artifacts/ids.ts",
+        "src/runtime/paths.ts",
+        "src/runtime/config.ts"
+      ],
+      "dependencies": [
+        "P1-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Artifact IDs are unique and type-aware in shape",
+        "Each artifact type maps to a stable on-disk directory",
+        "Helpers are reusable by store and services"
+      ]
+    },
+    {
+      "id": "P1-T4",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Implement artifact store",
+      "scope": "short",
+      "description": "Create a JSON-backed artifact store with typed get, put, exists, and listByType operations under .pi/artifacts.",
+      "deliverable": "Working artifact persistence layer",
+      "files": [
+        "src/artifacts/store.ts",
+        "tests/artifacts/store.test.ts"
+      ],
+      "dependencies": [
+        "P1-T2",
+        "P1-T3"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Artifacts can be persisted and reloaded by ID",
+        "Typed retrieval validates artifact_type on read",
+        "listByType returns stored artifacts for a type"
+      ]
+    },
+    {
+      "id": "P1-T5",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Add session state model",
+      "scope": "short",
+      "description": "Implement lightweight session state persistence for current stage, current artifact IDs, and lineage metadata.",
+      "deliverable": "Session state read/write helpers and restart-safe state model",
+      "files": [
+        "src/runtime/session-state.ts",
+        "tests/artifacts/session-state.test.ts"
+      ],
+      "dependencies": [
+        "P1-T3"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Session state can be initialized and reloaded",
+        "Current stage and artifact pointers persist across restarts",
+        "State model can represent lineage/history"
+      ]
+    },
+    {
+      "id": "P1-T6",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Create conductor stage-machine skeleton",
+      "scope": "short",
+      "description": "Add a minimal stage-machine shell and prompt constants so the extension has a real conductor runtime spine without implementing full workflow logic yet.",
+      "deliverable": "Stage-machine module and prompt scaffold",
+      "files": [
+        "src/conductor/stage-machine.ts",
+        "src/conductor/prompts.ts"
+      ],
+      "dependencies": [
+        "P1-T5"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Stage machine exposes current stage and transition helpers",
+        "Prompt constants are centralized for later phases",
+        "No raw repo-read capability is added to conductor logic"
+      ]
+    },
+    {
+      "id": "P1-T7",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Replace no-op extension bootstrap",
+      "scope": "short",
+      "description": "Modify the extension entrypoint to initialize the runtime, artifact store, and session state, and wire placeholder service hooks.",
+      "deliverable": "Non-no-op extension bootstrap that safely initializes conductor runtime",
+      "files": [
+        "extensions/conductor-extension.ts"
+      ],
+      "dependencies": [
+        "P1-T4",
+        "P1-T5",
+        "P1-T6"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Extension boot initializes runtime state without errors",
+        "Store and session state are available from extension startup",
+        "No raw repo file tools are exposed through conductor bootstrap"
+      ]
+    },
+    {
+      "id": "P1-T8",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Add stub service contracts",
+      "scope": "short",
+      "description": "Create typed placeholder service modules for intent expansion, retrieval dispatch, evidence preparation, synthesis dispatch, execution dispatch, and artifact promotion.",
+      "deliverable": "Stable service interfaces for later implementation phases",
+      "files": [
+        "src/services/intent-expand.ts",
+        "src/services/retrieval-dispatch.ts",
+        "src/services/evidence-assembler.ts",
+        "src/services/synthesis-dispatch.ts",
+        "src/services/execution-dispatch.ts",
+        "src/services/artifact-promote.ts"
+      ],
+      "dependencies": [
+        "P1-T1",
+        "P1-T4"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Each planned service has typed input/output contracts",
+        "Stub services return explicit not-implemented or fixture-backed results",
+        "Later phases can build on interfaces without breaking callers"
+      ]
+    },
+    {
+      "id": "P1-T9",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Add test runner and package scripts",
+      "scope": "short",
+      "description": "Introduce a test runner and package scripts so schema, store, and session-state tests run locally and in CI.",
+      "deliverable": "Runnable test command wired into package.json and CI if needed",
+      "files": [
+        "package.json",
+        ".github/workflows/ci.yml"
+      ],
+      "dependencies": [],
+      "status": "planned",
+      "acceptance_criteria": [
+        "npm test executes the new test suite",
+        "Core Phase 1 tests run in CI or documented local workflow",
+        "Project remains installable via existing scripts"
+      ]
+    },
+    {
+      "id": "P2-T1",
+      "sprint": "Sprint 2",
+      "phase": 2,
+      "title": "Implement Stage 1 intent capture and restatement loop",
+      "scope": "short",
+      "description": "Create the strict approval loop for intent capture, simple restatement, correctness check, and expansion yes/no question.",
+      "deliverable": "Working Stage 1 interaction flow producing intent-capture-v1 and intent-restatement-v1",
+      "files": [
+        "src/conductor/stage-1.ts",
+        "src/conductor/stage-machine.ts",
+        "tests/interaction/stage-1.test.ts"
+      ],
+      "dependencies": [
+        "P1-T4",
+        "P1-T5",
+        "P1-T6",
+        "P1-T7"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Conductor emits the required canonical restatement message shape",
+        "Approval turns are tracked",
+        "Retrieval cannot proceed before approval"
+      ]
+    },
+    {
+      "id": "P2-T2",
+      "sprint": "Sprint 2",
+      "phase": 2,
+      "title": "Implement expansion inclusion protocol",
+      "scope": "short",
+      "description": "Add tagged-file inclusion logic and project-doc discovery/prompting for README.md, AGENTS.md, and CLAUDE.md when no files are tagged.",
+      "deliverable": "Deterministic expansion-input creation with enforced inclusion rules",
+      "files": [
+        "src/conductor/expansion.ts",
+        "src/util/project-docs.ts",
+        "tests/interaction/expansion-protocol.test.ts"
+      ],
+      "dependencies": [
+        "P2-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "All tagged files are auto-included",
+        "Project-doc question appears only when required",
+        "Expansion input artifacts are persisted correctly"
+      ]
+    },
+    {
+      "id": "P3-T1",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Implement retrieval dispatch and normalization",
+      "scope": "short",
+      "description": "Build the retriever worker boundary and normalize its output into retrieval-index-v1 without exposing raw source to the conductor.",
+      "deliverable": "Stored retrieval-index-v1 artifacts from approved intent packages",
+      "files": [
+        "src/services/retrieval-dispatch.ts",
+        "src/retriever/worker.ts",
+        "src/retriever/normalize.ts",
+        "tests/retriever/retrieval-index.test.ts"
+      ],
+      "dependencies": [
+        "P2-T1",
+        "P2-T2",
+        "P1-T8"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Retriever output validates as retrieval-index-v1",
+        "Paths are absolute and line numbers are 1-indexed",
+        "No raw full-file payload is surfaced to conductor-safe retrieval fields"
+      ]
+    },
+    {
+      "id": "P4-T1",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Implement evidence plan and deterministic assembler",
+      "scope": "short",
+      "description": "Add conductor evidence-plan generation and deterministic preview/materialize assembly into evidence-bundle-v1.",
+      "deliverable": "Evidence planning plus deterministic evidence bundle materialization",
+      "files": [
+        "src/conductor/evidence-plan.ts",
+        "src/services/evidence-assembler.ts",
+        "src/util/spans.ts",
+        "src/util/budget.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": [
+        "P3-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Preview returns stable estimates",
+        "Materialize returns valid evidence-bundle-v1",
+        "Assembler includes only what the plan requested"
+      ]
+    },
+    {
+      "id": "P5-T1",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Implement synthesis dispatch",
+      "scope": "short",
+      "description": "Create synthesis prompt assembly and output validation for analysis-report-v1 and change-spec-v1.",
+      "deliverable": "Stored synthesis artifacts generated from evidence bundles",
+      "files": [
+        "src/services/synthesis-dispatch.ts",
+        "src/synthesis/prompt.ts",
+        "src/synthesis/worker.ts",
+        "tests/synthesis/output-validation.test.ts"
+      ],
+      "dependencies": [
+        "P4-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Synthesis supports analysis-report and change-spec task types",
+        "Outputs are schema-validated before persistence",
+        "Prompt assembly uses deterministic bundle sections"
+      ]
+    },
+    {
+      "id": "P6-T1",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Implement execution dispatch and recursive restart",
+      "scope": "short",
+      "description": "Add local execution from change-spec-v1, execution-report-v1 persistence, and synthesis artifact promotion to recursive-intent-v1 with restart at Stage 1.",
+      "deliverable": "Execution and recursive follow-up loop",
+      "files": [
+        "src/services/execution-dispatch.ts",
+        "src/services/artifact-promote.ts",
+        "src/conductor/recursive-intent.ts",
+        "tests/interaction/recursive-restart.test.ts"
+      ],
+      "dependencies": [
+        "P5-T1"
+      ],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Execution dispatch produces execution-report-v1",
+        "Promotion creates recursive-intent-v1",
+        "Promoted flows restart at Stage 1"
+      ]
+    }
+  ]
+}
