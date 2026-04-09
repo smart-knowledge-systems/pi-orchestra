@@ -593,7 +593,7 @@
       "dependencies": [
         "P5-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "recursive-intent-v1 lineage fields point at source artifact id and type",
         "Schema validation passes",
@@ -616,7 +616,7 @@
       "dependencies": [
         "P6-T4"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Protocol test: promotion restarts at Stage 1 with new verbatim intent",
         "Prior artifact IDs remain traceable in session metadata",

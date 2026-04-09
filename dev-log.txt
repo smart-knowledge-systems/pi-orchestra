@@ -338,3 +338,50 @@ All three active tasks are complete. **352 tests pass, 0 failures, typecheck cle
 - `src/services/execution-dispatch.ts` — stub → real implementation
 - `implementation-tasks.json` — P5-T4, P6-T2, P6-T3 marked completed
 - `dev-log.txt` — session entry added
+
+===== 2026-04-09T21:15:00Z | opus implement =====
+Both active tasks (P6-T4, P6-T5) are complete. **376 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P6-T4: Artifact promotion to recursive intent
+- **`src/services/artifact-promote.ts`** — Replaced stub with real implementation. Validates source type (only `analysis-report-v1` and `change-spec-v1` are promotable), verifies source exists in store, builds `recursive-intent-v1` with lineage fields pointing at source artifact ID/type, validates via schema before persisting. Handles error cases: non-promotable types, empty intent, missing source.
+- **`src/conductor/recursive-intent.ts`** — New conductor module with `promoteAndRestart()`, `getPromotionPrompt()`, `canPromote()`, `getPriorArtifactIds()`. Coordinates promotion service with stage machine reset.
+- **`tests/interaction/promotion.test.ts`** — 12 tests: promotion from both source types, lineage field verification, verbatim preservation, restart_stage=1, schema validation, error paths (non-promotable type, empty intent, missing source), unique IDs, store retrieval.
+
+### P6-T5: Session restart flow from promotion
+- **`src/conductor/recursive-intent.ts`** — `promoteAndRestart()` transitions to idle (recording recursive intent ID in lineage), then resets artifact pointers. Lineage is preserved across restarts.
+- **`tests/interaction/recursive-restart.test.ts`** — 12 tests: restart to idle, verbatim stored, prior artifact IDs traceable after restart, artifact pointers cleared, change-spec source, error on missing source (stage not reset), lineage grows across multiple restarts, canonical promotion prompt shape, canPromote helper.
+
+### Files created
+- `src/conductor/recursive-intent.ts`
+- `tests/interaction/promotion.test.ts`
+- `tests/interaction/recursive-restart.test.ts`
+
+### Files modified
+- `src/services/artifact-promote.ts` — stub → real implementation
+- `implementation-tasks.json` — P6-T4, P6-T5 marked completed
+
+===== 2026-04-09T21:09:30Z | opus implement =====
+Both tasks are complete. **376 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P6-T4: Artifact promotion to recursive intent
+- **`src/services/artifact-promote.ts`** — Real implementation replacing the stub. Validates promotable source types (`analysis-report-v1`, `change-spec-v1`), verifies source exists, builds `recursive-intent-v1` with lineage fields pointing at the source artifact ID and type, schema-validates before persisting.
+- **`src/conductor/recursive-intent.ts`** — New conductor module: `promoteAndRestart()`, `getPromotionPrompt()`, `canPromote()`, `getPriorArtifactIds()`.
+- **`tests/interaction/promotion.test.ts`** — 12 tests covering both source types, lineage verification, schema validation, and error paths.
+
+### P6-T5: Session restart flow from promotion
+- **`src/conductor/recursive-intent.ts`** — `promoteAndRestart()` transitions to idle (recording recursive intent in lineage), then resets artifact pointers while preserving lineage history across restarts.
+- **`tests/interaction/recursive-restart.test.ts`** — 12 tests: restart to Stage 1, verbatim stored, prior artifact IDs traceable, pointers cleared, lineage grows across multiple restarts, canonical promotion prompt shape.
+
+### Files modified
+- `src/services/artifact-promote.ts` — stub → real implementation
+- `implementation-tasks.json` — P6-T4, P6-T5 marked completed
+- `dev-log.txt` — session entry added
+
+### Files created
+- `src/conductor/recursive-intent.ts`
+- `tests/interaction/promotion.test.ts`
+- `tests/interaction/recursive-restart.test.ts`
