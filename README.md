@@ -10,7 +10,7 @@
 - local execution handoff
 - recursive follow-up flows
 
-The planned CLI alias is `piorx`.
+The CLI alias is `piorx`.
 
 ## Status
 
@@ -44,21 +44,29 @@ git clone <repo-url> piorx
 cd piorx
 ```
 
-## Planned command UX
+### 4. Link the wrapper command
 
-Once the extension wrapper is implemented, the intended UX is:
+```bash
+npm run link
+```
+
+### 5. Run the wrapper
 
 ```bash
 piorx
 ```
 
-Which will run `pi` with this repository's extension/runtime layer, while a plain `pi` invocation will remain unchanged and will not automatically include this project.
+`piorx` runs `pi` with this repository's extension entrypoint. A plain `pi` invocation remains unchanged and does not automatically include this project.
 
 ## Repository layout
 
 ```text
 README.md
 package.json
+bin/
+  piorx
+extensions/
+  conductor-extension.ts
 scripts/
   install-pi.sh
   doctor.sh
@@ -69,6 +77,10 @@ docs/
 ## Development
 
 This repo is intended to be easy to clone and extend for anyone who wants a conductor-style workflow on top of pi.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
