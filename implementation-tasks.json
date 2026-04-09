@@ -297,7 +297,7 @@
       "dependencies": [
         "P3-T1"
       ],
-      "status": "in_progress",
+      "status": "completed",
       "acceptance_criteria": [
         "Worker is reached only via retrieval_dispatch",
         "Conductor code cannot import worker internals",
@@ -368,7 +368,7 @@
       "dependencies": [
         "P3-T4"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Pure functions, no I/O",
         "Deterministic overlap merge covered by tests",
@@ -391,7 +391,7 @@
       "dependencies": [
         "P4-T2"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Preview is deterministic across runs",
         "Over-budget reports surface structured reasons, never silent pruning",

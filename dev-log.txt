@@ -205,3 +205,40 @@ All three tasks are complete. **151 tests pass, 0 failures, typecheck clean.**
 - **`src/conductor/retrieval.ts`** — `canStartRetrieval()` gate (checks stage + approved restatement) and `inspectRetrievalResult()` for conductor-safe retrieval inspection.
 - **`tests/retriever/normalize.test.ts`** — 5 tests: golden test for no raw content, schema validation, artifact_inspect refuses bundles, returns text-safe data, error on missing artifact.
 - **`tests/conductor/retrieval-stage.test.ts`** — 7 tests: blocks from idle, blocks without approval, allows with approval, blocks from evidence, allows from expansion, inspect returns data, inspect error on missing.
+
+===== 2026-04-09T20:43:36Z | opus implement =====
+All three active tasks are complete. **204 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P3-T2: Retriever worker prompt and config (was already done)
+- Verified existing implementation passes all tests. Updated status in `implementation-tasks.json`.
+
+### P4-T2: Span utilities
+- **`src/util/spans.ts`** — Pure functions with no I/O:
+  - `resolveSymbolToSpan()` — maps file_id + symbol_id to a `ResolvedSpan` using the retrieval index
+  - `expandNeighborLines()` — deterministic neighbor-line expansion, clamped to start >= 1
+  - `mergeOverlappingSpans()` — deterministic overlap merge (sorted by file_id/start/count, single-pass merge for same-file spans)
+  - `batchResolveSpans()` — resolve + expand + optionally merge in one call
+  - `SpanResolutionError` — thrown for unknown file/symbol IDs
+- **`tests/assembler/spans.test.ts`** — 25 tests covering resolution, expansion, merge determinism, adjacency, containment, cross-file isolation, and negative paths
+
+### P4-T3: Budget utilities and evidence_prepare preview mode
+- **`src/util/budget.ts`** — Pure budget estimation from plan + index metadata:
+  - `estimateBudget()` — per-file line estimates (skeleton, summary, spans with neighbor expansion/dedup), cross-file/gaps/followup lines, total + token estimate
+  - `checkBudget()` — structured over-budget reasons (never silent pruning)
+  - `estimateTokensFromLines()` — heuristic token estimator
+- **`src/services/evidence-assembler.ts`** — Preview mode implemented: loads plan + index from store, runs `checkBudget()`, returns deterministic estimates with structured over-budget reasons. Materialize mode remains stubbed for P4-T5.
+- **`tests/assembler/budget.test.ts`** — 28 tests covering estimation accuracy, neighbor expansion, dedup vs no-dedup, disabled spans, cross-file/gaps/followup inclusion, unknown ID rejection, determinism, budget checking, and full preview integration (including missing artifacts and over-budget surface)
+
+### Files modified
+- `implementation-tasks.json` — P3-T2, P4-T2, P4-T3 marked completed
+
+### Files created
+- `src/util/spans.ts`
+- `src/util/budget.ts`
+- `tests/assembler/spans.test.ts`
+- `tests/assembler/budget.test.ts`
+
+### Files updated
+- `src/services/evidence-assembler.ts` — preview mode implemented (added `over_budget_reasons` to `EvidencePreviewResult`)
