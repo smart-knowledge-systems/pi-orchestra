@@ -1,31 +1,33 @@
 {
   "name": "pi-orchestra",
   "version": "0.1.0",
-  "private": true,
-  "description": "A multi-stage conductor workflow for pi with intent clarification, retrieval, deterministic evidence assembly, synthesis, and execution handoff.",
-  "license": "MIT",
-  "type": "module",
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "biome": "^0.3.3",
+    "prettier": "^3.8.1",
+    "typescript": "^6.0.2"
+  },
   "bin": {
     "piorx": "./bin/piorx"
   },
+  "description": "A multi-stage conductor workflow for pi with intent clarification, retrieval, deterministic evidence assembly, synthesis, and execution handoff.",
+  "engines": {
+    "bun": ">=1.0.0",
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "private": true,
   "scripts": {
     "install:pi": "bash ./scripts/install-pi.sh",
+    "install:codeindex": "bash ./scripts/install-codeindex.sh",
     "doctor": "bash ./scripts/doctor.sh",
     "link": "npm link",
+    "smoke": "bash ./scripts/smoke.sh",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint .",
     "check": "bun run typecheck && bun run lint",
     "format": "prettier --write ."
   },
-  "engines": {
-    "bun": ">=1.0.0",
-    "node": ">=20"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.3.11",
-    "biome": "^0.3.3",
-    "prettier": "^3.8.1",
-    "typescript": "^6.0.2"
-  }
+  "type": "module"
 }
