@@ -1,11 +1,20 @@
 /**
- * Stub service: execution dispatch.
+ * Execution dispatch service.
  *
- * Takes a change-spec-v1 and evidence bundle, runs local execution, and
- * produces an execution-report-v1. Returns not-implemented until Phase 6.
+ * Takes a change-spec-v1 and evidence bundle, runs local execution via the
+ * worker, and produces an execution-report-v1.
+ *
+ * Safety constraints:
+ *   - Execution is blocked unless `allow_edits` is explicitly true.
+ *   - `run_validation` defaults to true when not specified.
  */
 
 import type { ArtifactStore } from '../artifacts/store.ts';
+import {
+  runExecutionWorker,
+  ExecutionBlockedError,
+  ExecutionValidationError,
+} from '../execution/worker.ts';
 
 // ---------------------------------------------------------------------------
 // Contract
@@ -23,22 +32,63 @@ export interface ExecutionDispatchInput {
 }
 
 export interface ExecutionDispatchResult {
-  status: 'not_implemented' | 'success' | 'error';
+  status: 'success' | 'blocked' | 'error';
   execution_report_id: string | null;
   message: string;
 }
 
 // ---------------------------------------------------------------------------
-// Stub implementation
+// Implementation
 // ---------------------------------------------------------------------------
 
 export async function executionDispatch(
-  _input: ExecutionDispatchInput,
-  _store: ArtifactStore,
+  input: ExecutionDispatchInput,
+  store: ArtifactStore,
 ): Promise<ExecutionDispatchResult> {
-  return {
-    status: 'not_implemented',
-    execution_report_id: null,
-    message: 'Execution dispatch is not yet implemented.',
-  };
+  // Load the change spec
+  const changeSpec = await store.get('change-spec-v1', input.change_spec_id);
+  if (!changeSpec) {
+    return {
+      status: 'error',
+      execution_report_id: null,
+      message: `Change spec not found: ${input.change_spec_id}`,
+    };
+  }
+
+  try {
+    // Run the execution worker (enforces safety constraints internally)
+    const report = await runExecutionWorker({
+      change_spec: changeSpec,
+      constraints: input.execution_constraints,
+    });
+
+    // Store the validated report
+    await store.put(report);
+
+    return {
+      status: 'success',
+      execution_report_id: report.artifact_id,
+      message: `Execution report created: ${report.artifact_id}`,
+    };
+  } catch (err) {
+    if (err instanceof ExecutionBlockedError) {
+      return {
+        status: 'blocked',
+        execution_report_id: null,
+        message: err.message,
+      };
+    }
+    if (err instanceof ExecutionValidationError) {
+      return {
+        status: 'error',
+        execution_report_id: null,
+        message: err.message,
+      };
+    }
+    return {
+      status: 'error',
+      execution_report_id: null,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
