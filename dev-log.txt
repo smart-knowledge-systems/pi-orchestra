@@ -242,3 +242,24 @@ All three active tasks are complete. **204 tests pass, 0 failures, typecheck cle
 
 ### Files updated
 - `src/services/evidence-assembler.ts` — preview mode implemented (added `over_budget_reasons` to `EvidencePreviewResult`)
+
+===== 2026-04-09T20:51:41Z | opus implement =====
+All three active tasks are complete. **260 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P4-T4: Evidence plan authoring helpers
+- **`src/conductor/evidence-plan.ts`** — `createEvidencePlan()` produces a valid `evidence-plan-v1` from a `retrieval-index-v1`. Embeds the retrieval index reference (byte-equal artifact_id/type). Supports per-file inclusion controls (`include_ast_skeleton`, `include_retriever_summary`, `include_entire_file`, `spans[]`), cross-file/gap/followup selections, and `assembly_options` with sensible defaults. Validates all file_id and symbol_id references against the index. `verifyEmbeddedIndex()` for checking reference integrity.
+- **`tests/assembler/evidence-plan.test.ts`** — 15 tests: schema round-trip, embedded index byte-equality, per-file controls, unknown ID rejection, cross-file/gap/followup toggles, assembly_options overrides, prompt_sections, target_task, unique IDs, file ordering.
+
+### P4-T5: Deterministic assembler materialize mode
+- **`src/services/evidence-assembler.ts`** — Full materialize implementation replacing the stub. Loads plan + authoritative retrieval index, verifies reference match, builds `intent_context` from stored intent artifacts, builds `structural_context` (AST skeletons, summaries, symbol metadata), resolves `raw_evidence` from disk (spans with neighbor expansion + dedup, or full files), computes stats, persists a valid `evidence-bundle-v1`. Same inputs produce byte-identical bundles (except unique artifact_id).
+- **`tests/assembler/evidence-assembler.test.ts`** — 14 tests: valid bundle production, byte-identical determinism, intent context, AST skeleton inclusion, summary inclusion, span content resolution, cross-file findings inclusion/exclusion, unknown file/symbol rejection, no-widening verification, include_entire_file, missing plan/index errors, wrong index reference error, stats correctness.
+
+### P4-T6: Determinism and boundary test suite
+- **`tests/assembler/determinism.test.ts`** — 4 tests: materialize byte-identical across 3 runs, preview identical estimates across 3 runs, file-order-independent span content, dedupe merge determinism with overlapping spans.
+- **`tests/assembler/boundaries.test.ts`** — 18 tests: budget over-budget surface for lines/tokens, structured reasons (never silent pruning), neighbor_lines=0 exact span, start clamped to 1, symmetric expansion, materialized neighbor lines, adjacent/overlapping/separate merge behavior, cross-file isolation, dedupe on/off in bundles, disabled spans produce no evidence, empty spans array, no content widening, unknown file/symbol ID exceptions, file-not-found error, cross-file exclusion.
+
+### Also modified
+- **`tests/assembler/budget.test.ts`** — Updated one test from `not_implemented` to `error` for materialize mode (since it's now implemented).
+- **`implementation-tasks.json`** — P4-T4, P4-T5, P4-T6 marked completed.

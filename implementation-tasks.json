@@ -413,7 +413,7 @@
       "dependencies": [
         "P4-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Plan validates against evidence-plan-v1 schema",
         "Embedded retrieval index is byte-equal to the stored source",
@@ -435,7 +435,7 @@
       "dependencies": [
         "P4-T4"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Same plan + retrieval + repo produces byte-identical bundle",
         "Assembler refuses unknown file/symbol IDs",
@@ -457,7 +457,7 @@
       "dependencies": [
         "P4-T5"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Determinism test covers same-inputs-same-output",
         "Boundary tests cover the Phase 4 contract",
