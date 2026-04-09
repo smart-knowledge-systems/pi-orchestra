@@ -281,3 +281,60 @@ Both tasks are complete. **294 tests pass, 0 failures, typecheck clean.**
 
 ### Files modified
 - `implementation-tasks.json` — P5-T2 and P5-T3 marked completed
+
+===== 2026-04-09T21:05:00Z | opus implement =====
+All three active tasks are complete. **352 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P5-T4: Conductor synthesis task-type selection and rendering
+- **`src/conductor/synthesis.ts`** — New module with:
+  - `selectTaskType()` — heuristic keyword scoring to choose `analysis-report` (explanation signals) vs `change-spec` (execution signals), defaulting to analysis-report on ties
+  - `renderAnalysisReport()` — renders summary, findings, risks, next steps; omits empty sections
+  - `renderChangeSpec()` — renders change goal, summary, edit paths+intents, tests, acceptance criteria; excludes raw targets/constraints
+  - `renderSynthesisResult()` — dispatcher by artifact_type
+  - `loadAndRenderSynthesis()` — loads from store and renders
+- **`tests/conductor/synthesis-selection.test.ts`** — 38 tests: task-type heuristic selection (explanation/execution/ambiguous/empty), rendering for both types, boundary checks that no raw evidence/bundle fields appear, loadAndRenderSynthesis integration
+
+### P6-T2: Execution worker with safety constraints
+- **`src/execution/worker.ts`** — Execution worker with:
+  - `enforceConstraints()` — blocks unless `allow_edits` is explicitly true
+  - `resolveConstraints()` — defaults `run_validation` to true
+  - `runExecutionWorker()` — enforces safety, collects modified files, runs validation commands, produces `execution-report-v1`
+- **`src/services/execution-dispatch.ts`** — Replaced stub with real implementation: loads change spec, runs worker, stores report, returns `blocked` status on safety violation
+- **`tests/execution/safety.test.ts`** — 22 tests: enforceConstraints unit tests, resolveConstraints defaults, worker blocked/allowed paths, modified file recording, validation skipping, dispatch integration with blocked/success/error paths
+
+### P6-T3: Execution report persistence
+- **`tests/execution/report.test.ts`** — 9 integration tests: change-spec-v1 fixture → stored execution-report-v1, schema validation, modified files recorded, validation commands recorded, correct change_spec_id reference, status field, notes, validation skipped path, store reloading
+
+### Files modified
+- `implementation-tasks.json` — P5-T4, P6-T2, P6-T3 marked completed
+
+===== 2026-04-09T21:03:50Z | opus implement =====
+All three active tasks are complete. **352 tests pass, 0 failures, typecheck clean.**
+
+## Summary
+
+### P5-T4: Conductor synthesis task-type selection and rendering
+- **`src/conductor/synthesis.ts`** — Heuristic `selectTaskType()` (keyword scoring: explanation signals → analysis-report, execution signals → change-spec, default analysis-report on ties). Render functions that produce user-facing sections without exposing raw bundle content, evidence_bundle_id, or internal target details.
+- **`tests/conductor/synthesis-selection.test.ts`** — 38 tests covering selection heuristics, rendering for both artifact types, boundary checks that no raw evidence leaks through.
+
+### P6-T2: Execution worker with safety constraints
+- **`src/execution/worker.ts`** — `enforceConstraints()` blocks unless `allow_edits === true`. `resolveConstraints()` defaults `run_validation` to true. Worker produces `execution-report-v1` after safety check.
+- **`src/services/execution-dispatch.ts`** — Real implementation replacing stub: loads change spec, runs worker, returns `blocked` status on safety violation.
+- **`tests/execution/safety.test.ts`** — 22 tests covering flag enforcement, constraint defaults, worker blocked/allowed paths, dispatch integration.
+
+### P6-T3: Execution report persistence
+- **`tests/execution/report.test.ts`** — 9 integration tests: change-spec-v1 fixture → stored valid execution-report-v1 with schema validation, modified files, validation commands, correct references, and store reload.
+
+### Files created
+- `src/conductor/synthesis.ts`
+- `src/execution/worker.ts`
+- `tests/conductor/synthesis-selection.test.ts`
+- `tests/execution/safety.test.ts`
+- `tests/execution/report.test.ts`
+
+### Files modified
+- `src/services/execution-dispatch.ts` — stub → real implementation
+- `implementation-tasks.json` — P5-T4, P6-T2, P6-T3 marked completed
+- `dev-log.txt` — session entry added

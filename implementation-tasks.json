@@ -525,7 +525,7 @@
       "dependencies": [
         "P5-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Task-type selection is covered by stage-machine tests",
         "Rendering excludes raw evidence fields",
@@ -548,7 +548,7 @@
       "dependencies": [
         "P5-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Execution is blocked unless allow_edits is true",
         "run_validation default is covered by tests",
@@ -570,7 +570,7 @@
       "dependencies": [
         "P6-T2"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Integration test from change-spec-v1 fixture to stored valid execution report",
         "Modified files and validation commands are recorded",
