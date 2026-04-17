@@ -26,7 +26,7 @@ import { RESTATEMENT_APPROVAL_QUESTION, EXPANSION_OFFER } from '../../src/conduc
 // ---------------------------------------------------------------------------
 
 /** Deterministic restate function that prefixes intent with "Restatement: " */
-const echoRestate: RestateFunction = (intent) => `Restatement: ${intent}`;
+const echoRestate: RestateFunction = ({ cleanedIntent }) => `Restatement: ${cleanedIntent}`;
 
 async function setup() {
   const tmpDir = await mkdtemp(join(tmpdir(), 'stage1-test-'));

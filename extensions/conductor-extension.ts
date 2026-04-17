@@ -32,10 +32,11 @@ import {
   type PromotionResult,
 } from '../src/conductor/recursive-intent.ts';
 import { canStartRetrieval, inspectRetrievalResult } from '../src/conductor/retrieval.ts';
-import { Stage1Controller } from '../src/conductor/stage-1.ts';
+import { Stage1Controller, type RestateInput } from '../src/conductor/stage-1.ts';
 import { CONDUCTOR_SYSTEM_PREAMBLE, RESTATEMENT_INSTRUCTION } from '../src/conductor/prompts.ts';
 import { StageMachine } from '../src/conductor/stage-machine.ts';
 import { createConfig, type PiOrchestraConfig } from '../src/runtime/config.ts';
+import { buildRestatementContext, toIntentFileRefs } from '../src/util/intent-files.ts';
 import { evidenceAssemble } from '../src/services/evidence-assembler.ts';
 import { executionDispatch } from '../src/services/execution-dispatch.ts';
 import { retrievalDispatch } from '../src/services/retrieval-dispatch.ts';
@@ -292,12 +293,11 @@ function formatList(title: string, items: string[], maxItems = 5): string {
   return [`${title}:`, ...shown, ...remainder].join('\n');
 }
 
-async function restateWithModel(userIntent: string, ctx: ExtensionContext): Promise<string> {
-  return getModelText(
-    `${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`,
-    userIntent,
-    ctx,
-  );
+async function restateWithModel(input: RestateInput, ctx: ExtensionContext): Promise<string> {
+  const userText = input.contextBlock
+    ? `${input.cleanedIntent}\n\n${input.contextBlock}`
+    : input.cleanedIntent;
+  return getModelText(`${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`, userText, ctx);
 }
 
 type ParsedExpandedSpec = {
@@ -893,12 +893,25 @@ async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContex
     throw new Error(`Pipeline can only start from idle, got ${machine.currentStage}`);
   }
 
-  const controller = new Stage1Controller(runtime.store, machine, (intent) =>
-    restateWithModel(intent, ctx),
+  const controller = new Stage1Controller(runtime.store, machine, (input) =>
+    restateWithModel(input, ctx),
   );
 
-  await controller.captureIntent(initialIntent, []);
-  await logEvent('stage1.intent_captured', { sessionState: machine.sessionState });
+  const restatementContext = await buildRestatementContext(initialIntent, runtime.config.repoRoot);
+  await controller.captureIntent(initialIntent, restatementContext.taggedFiles, {
+    cleanedIntent: restatementContext.cleanedIntent,
+    intentFileRefs: toIntentFileRefs(restatementContext.files),
+    restatementContext: restatementContext.contextBlock || undefined,
+  });
+  await logEvent('stage1.intent_captured', {
+    sessionState: machine.sessionState,
+    taggedFiles: restatementContext.taggedFiles,
+    intentFileRefs: restatementContext.files.map((file) => ({
+      path: file.path,
+      source: file.source,
+      truncated: file.truncated,
+    })),
+  });
 
   let restatement = await controller.produceRestatement();
   await logEvent('stage1.restatement_produced', { restatedIntent: restatement.restated_intent });

@@ -16,7 +16,7 @@
 
 import type { ArtifactStore } from '../artifacts/store.ts';
 import { generateArtifactId } from '../artifacts/ids.ts';
-import type { IntentCaptureV1, IntentRestatementV1 } from '../artifacts/types.ts';
+import type { IntentCaptureV1, IntentFileRef, IntentRestatementV1 } from '../artifacts/types.ts';
 import type { StageMachine } from './stage-machine.ts';
 import {
   RESTATEMENT_INSTRUCTION,
@@ -29,12 +29,33 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
+ * Input to the restatement function. The cleaned intent is the user's request
+ * with inline `<file>` blocks stripped; the optional context block carries
+ * bounded file context extracted from those same blocks.
+ */
+export interface RestateInput {
+  cleanedIntent: string;
+  contextBlock?: string;
+}
+
+/**
  * A function that produces a simple restatement of the user's intent.
  *
  * In production this will be backed by a model call; in tests it can be
  * a deterministic stub.
  */
-export type RestateFunction = (userIntent: string) => Promise<string> | string;
+export type RestateFunction = (input: RestateInput) => Promise<string> | string;
+
+/**
+ * Optional capture metadata derived from parsing the initial user intent.
+ * When omitted, the cleaned intent defaults to the verbatim text and no
+ * file-reference bookkeeping is persisted.
+ */
+export interface IntentCaptureOptions {
+  cleanedIntent?: string;
+  intentFileRefs?: IntentFileRef[];
+  restatementContext?: string;
+}
 
 /** Possible user responses to the restatement approval question. */
 export type ApprovalResponse = { approved: true } | { approved: false; correction: string };
@@ -75,6 +96,7 @@ export interface Stage1Result {
 export class Stage1Controller {
   private approvalTurns = 0;
   private intentCapture: IntentCaptureV1 | null = null;
+  private restatementContext: string | undefined;
 
   constructor(
     private readonly store: ArtifactStore,
@@ -91,14 +113,18 @@ export class Stage1Controller {
   async captureIntent(
     userIntentVerbatim: string,
     taggedFiles: string[] = [],
+    options: IntentCaptureOptions = {},
   ): Promise<IntentCaptureV1> {
     const id = generateArtifactId('intent-capture-v1');
     const capture: IntentCaptureV1 = {
       artifact_type: 'intent-capture-v1',
       artifact_id: id,
       user_intent_verbatim: userIntentVerbatim,
-      cleaned_user_intent: userIntentVerbatim,
+      cleaned_user_intent: options.cleanedIntent ?? userIntentVerbatim,
       tagged_files: taggedFiles,
+      ...(options.intentFileRefs && options.intentFileRefs.length > 0
+        ? { intent_file_refs: options.intentFileRefs }
+        : {}),
       timestamp: new Date().toISOString(),
     };
 
@@ -106,6 +132,7 @@ export class Stage1Controller {
     await this.machine.transition('restatement', id);
     await this.machine.setArtifact('intent_capture_id', id);
     this.intentCapture = capture;
+    this.restatementContext = options.restatementContext;
     return capture;
   }
 
@@ -119,7 +146,10 @@ export class Stage1Controller {
     if (!this.intentCapture) {
       throw new Error('Cannot produce restatement: no intent captured yet');
     }
-    const restated = await this.restate(this.intentCapture.user_intent_verbatim);
+    const restated = await this.restate({
+      cleanedIntent: this.intentCapture.cleaned_user_intent,
+      contextBlock: this.restatementContext,
+    });
     return {
       restated_intent: restated,
       approval_question: RESTATEMENT_APPROVAL_QUESTION,
@@ -146,7 +176,10 @@ export class Stage1Controller {
       return { done: true, restated_intent: currentRestatement };
     }
 
-    // User corrected — recapture with the correction as a new intent
+    // User corrected — recapture with the correction as a new intent.
+    // Corrections are typed by the user into a prompt UI and are not expected
+    // to contain inline <file> blocks, so the verbatim and cleaned forms
+    // match. Existing tagged files and refs are preserved for continuity.
     const newId = generateArtifactId('intent-capture-v1');
     const newCapture: IntentCaptureV1 = {
       artifact_type: 'intent-capture-v1',
@@ -154,6 +187,9 @@ export class Stage1Controller {
       user_intent_verbatim: response.correction,
       cleaned_user_intent: response.correction,
       tagged_files: this.intentCapture?.tagged_files ?? [],
+      ...(this.intentCapture?.intent_file_refs
+        ? { intent_file_refs: this.intentCapture.intent_file_refs }
+        : {}),
       timestamp: new Date().toISOString(),
     };
     await this.store.put(newCapture);
