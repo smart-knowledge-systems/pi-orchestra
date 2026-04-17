@@ -405,3 +405,35 @@ All three active Sprint 7 follow-up tasks (AR-P7-T4, AR-P7-T5, AR-P7-T6) are com
 **Verification**: `bunx tsc --noEmit` clean; `bun test` 495 pass / 0 fail (+21 from 474).
 
 **Note**: AR-P8-T4 (override docs/semantics reconciliation) was predicated on the gaps closed here; it's still listed as `planned` but the implementation half of its dependency chain is now landed.
+
+===== 2026-04-17 | opus implement AR-P8-T3 + AR-P8-T5 =====
+Both active tasks complete.
+
+**AR-P8-T3 — agent-driven end-to-end coverage**
+- `tests/interaction/agentic-retrieval-flow.test.ts`: added a second `describe` block (`agent-driven retriever path`) with two tests. Imports `AgentModelCallback` from `src/retriever/agent-types.ts`.
+  - Test 1 (`retrievalDispatch with a stubbed retrieverAgentModel narrows the plan to the agent recommendation`): writes distractor files (`src/lib/session-store.ts`, `src/lib/model-config.ts`) next to the Stage 1 fixture so the scout tier can plausibly hold more than one candidate, runs a scout-only dispatch as a baseline, then runs a second dispatch with a stubbed `retrieverAgentModel` that returns a single `status: 'stop'` recommendation pointing at `src/core/model-resolver.ts`. Asserts the model callback fired exactly once, `dispatchResult.message` contains `agent rounds=1` / `stop=agent_stopped`, the stored `retrieval-index-v1` has exactly one selected-tier file matching the agent's target with `default_evidence_mode='spans'`, `strategy_summary` carries the agent's text, `confidence='high'`, the agent-driven `createRecommendedEvidencePlan` output has one file + one span + `neighbor_lines=1`, the plan cannot be wider than the scout baseline (strictly narrower when scout selected >1), and the structural-only invariants still hold (no `raw_content`, no function bodies leak).
+  - Test 2 (`agent-driven bundle materializes only the agent-selected evidence`): drives the same flow through `evidenceAssemble(mode='materialize')` and proves the final bundle contains exactly one file path (the agent's pick) with no distractor paths anywhere in `structural_context.files` or `raw_evidence`.
+- No changes required to `src/services/retrieval-dispatch.ts` or `tests/retriever/agent.test.ts` — the existing dispatch options and agent tests already supported this coverage; the task file list was a superset rather than an actual change surface. `retrievalDispatch`'s existing `retrieverAgentModel` option and its agent-telemetry suffix in the success message were sufficient to drive and observe the agent path end-to-end.
+
+**AR-P8-T5 — Stage 1 temp-dir cleanup**
+- `tests/interaction/stage-1.test.ts`: imported `afterEach` from `bun:test` (rm was already imported), initialized `tmpDir` to an empty string so stale references cannot survive a failing `beforeEach`, and added an `afterEach` that snapshots the current `tmpDir`, resets it, and runs `rm(..., { recursive: true, force: true })` inside a try/catch so cleanup errors cannot mask a real test failure. `force: true` tolerates missing paths.
+- Verified on macOS: `/var/folders/.../T` had 334 pre-existing `stage1-test-*` directories. After the fix, running `bun test tests/interaction/stage-1.test.ts` leaves the count unchanged (delta = 0). The pre-existing leaked directories are out of scope for this task but should be manually cleanable with `find <tmpdir> -maxdepth 1 -name 'stage1-test-*' -type d -exec rm -rf {} +`.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 497 pass / 0 fail (up from 495 — 2 net new tests). Full suite runs clean in ~310ms.
+
+**Files modified**: `tests/interaction/agentic-retrieval-flow.test.ts`, `tests/interaction/stage-1.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P8-T4 (override docs/semantics reconciliation) remains `planned` — it was not in the active-task set for this run.
+
+===== 2026-04-17T22:51:33Z | opus implement =====
+Both active tasks complete.
+
+**AR-P8-T3** — Added `describe('agentic retrieval flow — agent-driven retriever path', ...)` to `tests/interaction/agentic-retrieval-flow.test.ts` with two tests. They seed distractor files next to the Stage 1 fixture, run a scout-only dispatch as a baseline, then drive `retrievalDispatch` with a stubbed `AgentModelCallback` that returns a single-file `stop` recommendation. Assertions cover: the callback fires, `dispatchResult.message` carries `agent rounds=1` / `stop=agent_stopped`, the stored `retrieval-index-v1` selects only the agent's target with `default_evidence_mode='spans'` + `confidence='high'`, `createRecommendedEvidencePlan` mirrors the narrower scope (one file, one span, `neighbor_lines=1`), the agent plan is strictly narrower than scout's when scout selected >1, raw bodies still never leak, and `evidenceAssemble` materializes only the agent's file. No changes needed to `retrieval-dispatch.ts` or `agent.test.ts` — existing dispatch options + agent tests already supported this coverage.
+
+**AR-P8-T5** — Added `afterEach` teardown in `tests/interaction/stage-1.test.ts` that snapshots `tmpDir`, resets it, and calls `rm(..., { recursive: true, force: true })` inside a try/catch so cleanup errors don't mask test failures. Initialized `tmpDir` to `''` so stale references can't survive a failing `beforeEach`. Verified: pre-fix 334 leaked `stage1-test-*` dirs existed; post-fix, repeated test runs show delta = 0.
+
+**Files modified**: `tests/interaction/agentic-retrieval-flow.test.ts`, `tests/interaction/stage-1.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Verification**: `bunx tsc --noEmit` clean; `bun test` 497 pass / 0 fail (up from 495, +2 new tests).
+
+Nothing unfinished in the active-task scope. AR-P8-T4 remains `planned`, as it was not in the active set.

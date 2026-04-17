@@ -524,7 +524,7 @@
         "src/services/retrieval-dispatch.ts"
       ],
       "dependencies": ["AR-P4-T3", "AR-P8-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "An end-to-end test drives retrievalDispatch with a stubbed retrieverAgentModel rather than relying only on scout-only fallback",
         "The agent-driven path proves that the stored retrieval artifact and recommended evidence plan reflect the narrower agent recommendation",
@@ -564,7 +564,7 @@
       "deliverable": "Stage 1 interaction tests with deterministic temp-directory cleanup",
       "files": ["tests/interaction/stage-1.test.ts"],
       "dependencies": [],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Stage 1 interaction tests remove mkdtemp-created directories after each test run",
         "Cleanup remains robust when tests fail mid-run",
