@@ -1,40 +1,48 @@
 # Multi-Stage Orchestration Specification
 
-This specification defines a layered pi-based orchestration system for intent clarification, retrieval, deterministic evidence assembly, synthesis, and optional execution.
+This specification defines a layered pi-based orchestration system for intent clarification, agentic retrieval, deterministic evidence assembly, synthesis, and optional execution.
 
 ## Goals
 
-- Keep the **conductor agentic**, but structurally unable to inspect raw repository source.
-- Keep the **evidence assembler deterministic**, driven entirely by an explicit conductor API.
-- Let retrieval produce rich structural judgments that the conductor can use to decide what evidence is later materialized.
+- Keep the **conductor agentic**, but structurally unable to inspect raw repository source — with a single narrow exception for files the user explicitly embedded in the initial intent.
+- Drive retrieval through a **deterministic scout followed by a bounded file-reading retriever agent**, not a broad single-pass heuristic.
+- Make the **retriever the primary author of the default evidence scope** — the stored retrieval artifact carries an explicit recommended-evidence package.
+- Keep the stored **retrieval artifact structural-only**: no raw file bodies leak into conductor-visible fields.
+- Keep the **evidence assembler deterministic**, materializing only the retriever-authored plan (optionally patched by the conductor).
 - Support recursive workflows where a synthesis result can become a new user intent and restart the pipeline.
 - Support optional user-approved intent expansion before retrieval.
 
 ## Core Principles
 
-1. **The conductor never reads raw file contents**.
-2. **The retriever may read and search the repository freely** within its allowed tool set.
-3. **The evidence assembler is never agentic**; it only resolves the conductor's explicit evidence plan.
-4. **The conductor passes the retriever response unchanged** to the evidence assembler.
-5. **Raw code is injected only into downstream prompts**, not back into the conductor context.
-6. **Intent clarification happens before retrieval**.
-7. **A synthesis result may recursively become a new user intent**, restarting at Stage 1.
+1. **The conductor is source-blind** — it does not read repository files, with one exception: files the user explicitly embedded in the initial intent via `<file name="...">...</file>` blocks may be read before restatement.
+2. **Retrieval is agentic but bounded**. A deterministic scout narrows the candidate set, then a bounded model-driven retriever agent reads files, follows leads, and authors the default evidence scope within strict limits.
+3. **The stored retrieval artifact is structural-only**. It carries summaries, AST skeletons, selection tiers, and an explicit `recommended_evidence` package, but no raw file bodies.
+4. **The retriever, not the conductor, authors the default evidence scope**. The conductor's role at Stage 4 is a narrow override layer — promote reserve files, tune spans, toggle section flags — not to reinvent the plan.
+5. **The evidence assembler is never agentic**; it deterministically materializes the selected plan.
+6. **Raw code is injected only into downstream prompts**, not back into the conductor context.
+7. **Intent clarification happens before retrieval**.
+8. **A synthesis result may recursively become a new user intent**, restarting at Stage 1.
 
 ## Stages
 
 ### Stage 0: User intent capture
 
-The user provides an initial intent.
+The user provides an initial intent. Intent text may embed inline file blocks of the form `<file name="path">...contents...</file>`. These are the only repository files the conductor is permitted to read directly.
 
 ### Stage 1: Restatement and approval loop
 
 The conductor:
 
-- produces a **simple restatement** of the user's intent
+- parses inline `<file name="...">...</file>` blocks out of the initial intent
+- extracts **tagged files** and builds a bounded restatement context from those files
+- persists both `user_intent_verbatim` (raw) and `cleaned_user_intent` (cleaned of inline file bodies) on `intent-capture-v1`
+- produces a **simple restatement** of the user's intent, using the cleaned intent plus the bounded file context
 - asks whether the restatement is correct
 - asks whether the user wants the intent expanded into a fuller specification before retrieval
 
-If the restatement is incorrect, the user corrects it and Stage 1 repeats.
+If the restatement is incorrect, the user corrects it and Stage 1 repeats. Tagged files and file references are preserved across corrections.
+
+This inline-file read is the **only** conductor-side repo-reading exception. The conductor does not otherwise have `read`/`grep`/`bash`/`ls`/`find` tools.
 
 ### Stage 2: Optional expansion
 
@@ -47,28 +55,31 @@ If the user requests expansion:
 
 If the user rejects or corrects the expansion, this stage may repeat.
 
-### Stage 3: Retrieval
+### Stage 3: Retrieval (scout + bounded agent)
+
+Retrieval runs as two cooperating passes inside a single boundary:
+
+1. **Deterministic scout** — turns the cleaned intent, restatement, retrieval focus, and tagged files into curated search terms, walks the repo in sorted order, and narrows the candidate set to a small `selected` set plus a `reserve` tier (strict caps: 8 selected + 4 reserve). Scout output is deterministic: same repo + same inputs → identical output. The scout also emits per-file role hints and default-evidence-mode hints.
+2. **Bounded retriever agent** — a model-driven loop that receives the scout seed, reads files through a deterministic executor (`read_file`, `search_content`, `search_paths`, `follow_imports`), follows leads, rejects false positives, and authors the final selection. Hard caps on rounds, actions per round, file reads, lines/bytes per read, and total observation budget guarantee termination. The agent produces the final `recommended_evidence` package.
 
 The retriever receives:
 
-- verbatim initial intent
+- cleaned user intent
 - approved restated intent
 - optional approved expanded spec
+- tagged files from Stage 1
 
-The retriever returns a full `retrieval-index-v1` artifact.
+The retriever returns a normalized `retrieval-index-v1` artifact. The stored artifact is **structural-only** — it contains summaries, AST skeletons, selection tiers, scout terms, a strategy summary, and an explicit `recommended_evidence` block, but **no raw file bodies**. Raw file reads stay inside the retriever boundary.
 
-### Stage 4: Evidence planning
+### Stage 4: Evidence planning (retriever-authored default + narrow overrides)
 
-The conductor reads the retrieval artifact and decides:
+The default evidence plan is **authored by the retriever**, not guessed by the conductor. The conductor:
 
-- which files/symbols/spans should be resolved
-- whether to include AST skeletons
-- whether to include retriever summaries
-- whether to include resolved spans
-- whether to include whole files
-- which downstream synthesis task should run
+- builds the default plan directly from `retrieval_index.recommended_evidence` via `createRecommendedEvidencePlan`
+- optionally applies a narrow, deterministic set of **overrides** — promote/demote a file, tune file mode, add/remove/adjust symbol spans, toggle cross-file findings / gaps / followup queries
+- **never rebuilds the plan from scratch** and never adds new file-reading capability
 
-The conductor produces `evidence-plan-v1`.
+The conductor produces `evidence-plan-v1` containing the retriever-authored selection (optionally patched) plus assembly and prompt-section options.
 
 ### Stage 5: Deterministic evidence assembly
 
@@ -77,7 +88,7 @@ The evidence assembler receives:
 - the full, unchanged retriever response
 - the conductor's `evidence-plan-v1`
 
-It deterministically resolves and stores an `evidence-bundle-v1`.
+It deterministically materializes only the selected raw evidence and stores an `evidence-bundle-v1`. Reserve files never enter the bundle unless the conductor explicitly promoted them.
 
 ### Stage 6: Synthesis
 
@@ -142,13 +153,14 @@ user intent
 
 ## Boundary summary
 
-| Component          | Agentic |        Can read raw repo code? |                  Can emit raw repo code? |
-| ------------------ | ------: | -----------------------------: | ---------------------------------------: |
-| Conductor          |     Yes |                             No |                                       No |
-| Retriever          |     Yes |                            Yes | No direct raw-source return to conductor |
-| Evidence Assembler |      No |         Yes, deterministically |       Yes, only into bundle/output store |
-| Synthesizer        |     Yes | Yes, via assembled bundle only |                                      Yes |
-| Executor           |     Yes |                            Yes |                                      Yes |
+| Component          | Agentic |                         Can read raw repo code? |                    Can emit raw repo code? |
+| ------------------ | ------: | ----------------------------------------------: | -----------------------------------------: |
+| Conductor          |     Yes |   Only user-embedded `<file>` blocks at Stage 1 |                                         No |
+| Retriever scout    |      No |   Yes, deterministic file walk inside retriever |                     Structural output only |
+| Retriever agent    |     Yes | Yes, bounded via executor (read/search/imports) | No raw bodies in stored retrieval artifact |
+| Evidence Assembler |      No |                          Yes, deterministically |         Yes, only into bundle/output store |
+| Synthesizer        |     Yes |                  Yes, via assembled bundle only |                                        Yes |
+| Executor           |     Yes |                                             Yes |                                        Yes |
 
 ## Related documents
 

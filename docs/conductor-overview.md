@@ -19,12 +19,12 @@ It coordinates a staged pipeline:
 
 The key design rule is:
 
-- **The conductor never reads raw repo files**
+- **The conductor is structurally source-blind**, with one narrow exception: at Stage 1 only, files the user explicitly embedded in the initial intent via `<file name="…">…</file>` blocks may be read through the bounded `buildRestatementContext` helper. Nothing else in the conductor code path reads repository files.
 
 Instead:
 
-- the **retriever** can read/search code
-- the **evidence assembler** can deterministically resolve raw spans/files
+- the **retriever** runs as a deterministic scout plus a bounded file-reading agent
+- the **evidence assembler** deterministically resolves the retriever-authored plan
 - the **synthesizer** sees assembled evidence
 - the **executor** can edit/run validation
 
@@ -70,15 +70,22 @@ So the conductor is not just “prompting”; it’s operating over persisted wo
 ### 3. Stage 1: restatement + approval
 
 `src/conductor/stage-1.ts`
+`src/util/intent-files.ts`
 
-This is the first real conductor behavior.
+This is the first real conductor behavior, and the only one with a file-reading exception.
 
-It:
+Before restatement:
 
-- stores the user’s verbatim request as `intent-capture-v1`
-- generates a **simple restatement**
+- parses `<file name="path">…</file>` blocks from the raw intent
+- records each tagged file in `intent_file_refs` with provenance (`inline | disk | reference-only`)
+- builds a bounded restatement context (per-file and total char/line budgets) — inline bodies are used when present; a disk fallback is permitted for paths referenced by name
+- persists both `user_intent_verbatim` (raw) and `cleaned_user_intent` (file bodies stripped) on `intent-capture-v1`
+
+Then it:
+
+- generates a **simple restatement** from the cleaned intent plus the bounded context block
 - asks the user to approve/correct it
-- loops until approved
+- loops until approved (tagged files and file refs carry through)
 - asks whether the user wants **expansion**
 - stores the approved result as `intent-restatement-v1`
 
@@ -98,46 +105,51 @@ for a fuller spec. The user then reviews and approves/revises that spec before c
 
 ### 5. Retrieval
 
-`src/conductor/retrieval.ts`  
+`src/conductor/retrieval.ts`
+`src/retriever/scout.ts`
+`src/retriever/agent.ts`
 `src/retriever/worker.ts`
 
-The conductor itself does **not** retrieve code. Instead it:
+The conductor itself does **not** retrieve code. Retrieval runs as two cooperating passes inside a single boundary:
+
+- a **deterministic scout** (no model) curates search terms using provenance weighting (`retrieval_focus` > tagged > restatement > cleaned intent), walks the repo, and emits a narrow `selected` (≤8) plus `reserve` (≤4) tier with role and default-evidence-mode hints
+- a **bounded retriever agent** (model-driven via an injected callback) reads files through a deterministic executor (`read_file`, `search_content`, `search_paths`, `follow_imports`) under hard caps, rejects false positives, and authors the final `recommended_evidence` package
+
+The conductor:
 
 - checks whether retrieval is allowed
-- dispatches to the retriever worker
-- later inspects a **text-safe retrieval artifact**
+- dispatches retrieval once (scout + agent run together)
+- later inspects the **structural-only** retrieval artifact
 
-The retriever can read the repo and produces `retrieval-index-v1`, but normalization strips raw file payloads from conductor-visible fields.
+The stored `retrieval-index-v1` contains summaries, AST skeletons, selection tiers, cross-file findings, strategy summary, scout terms, and `recommended_evidence` — but **no raw file bodies**. Raw reads stay inside the retriever boundary.
 
 So the conductor sees things like:
 
 - file summaries
-- symbol lists
+- symbol lists and per-symbol selection defaults
 - AST skeletons
-- gaps
-- follow-up suggestions
+- selection tiers and default evidence mode
+- cross-file findings
+- gaps and follow-up queries
+- the retriever-authored `recommended_evidence` block
 
 but not raw source.
 
 ### 6. Evidence planning
 
 `src/conductor/evidence-plan.ts`
+`src/conductor/evidence-overrides.ts`
 
-This is where the conductor makes decisions.
+The default plan is **authored by the retriever**. The conductor:
 
-Given the retrieval index, it decides:
+- builds the starting plan directly from `retrieval_index.recommended_evidence` via `createRecommendedEvidencePlan`
+- optionally applies a narrow list of overrides via `applyEvidenceOverrides` — `promote_file`, `demote_file`, `set_file_mode`, `include_symbol`, `exclude_symbol`, `set_neighbor_lines`, `toggle_cross_file_findings`, `toggle_gaps`, `toggle_followup_queries`
+- never reconstructs the plan from scratch and never adds new file-reading capability
+- picks the downstream task type
 
-- which files matter
-- which symbols/spans to include
-- whether to include AST skeletons
-- whether to include retriever summaries
-- whether to include whole files
-- whether to include cross-file findings, gaps, followups
-- what downstream task type to run
+Overrides are validated against the retrieval artifact. Unknown `file_id`s or `symbol_id`s fail loudly and the whole override list is rejected atomically, preserving the default plan byte-identical.
 
-It then creates `evidence-plan-v1`.
-
-Important detail: the plan embeds a reference to the retrieval index unchanged, and the actual raw materialization is left to the deterministic assembler.
+It then creates `evidence-plan-v1`. The plan embeds a reference to the retrieval index unchanged, and the actual raw materialization is left to the deterministic assembler.
 
 ### 7. Deterministic evidence assembly
 
@@ -147,10 +159,10 @@ This is _not_ conductor reasoning.
 
 The assembler takes:
 
-- the retrieval result
+- the retriever response unchanged
 - the conductor’s evidence plan
 
-and deterministically produces `evidence-bundle-v1`.
+and deterministically produces `evidence-bundle-v1`. Only selected files are materialized; reserve files never enter the bundle unless the conductor explicitly promoted them via an override.
 
 That bundle is where raw code can finally appear for downstream use.
 
@@ -234,8 +246,12 @@ If you want to trace it in code, start here:
 - `extensions/conductor-extension.ts`
 - `src/conductor/stage-machine.ts`
 - `src/conductor/stage-1.ts`
+- `src/util/intent-files.ts`
 - `src/conductor/retrieval.ts`
+- `src/retriever/scout.ts`
+- `src/retriever/agent.ts`
 - `src/conductor/evidence-plan.ts`
+- `src/conductor/evidence-overrides.ts`
 - `src/conductor/synthesis.ts`
 - `src/conductor/recursive-intent.ts`
 - `docs/specification/00-overview.md`
