@@ -82,6 +82,8 @@ export async function retrievalDispatch(
     repoRoot: config.repoRoot,
     query: assembled.query,
     retrievalFocus: assembled.retrievalFocus.length > 0 ? assembled.retrievalFocus : undefined,
+    searchTerms: assembled.searchTerms,
+    taggedFiles: assembled.taggedFiles.length > 0 ? assembled.taggedFiles : undefined,
   });
 
   // Normalize into retrieval-index-v1

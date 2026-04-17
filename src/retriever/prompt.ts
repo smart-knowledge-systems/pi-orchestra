@@ -43,10 +43,74 @@ export interface PromptAssemblyInput {
 export interface AssembledPrompt {
   /** The system prompt for the retriever worker. */
   systemPrompt: string;
-  /** The assembled query string for the retriever. */
+  /** Human-readable retrieval brief. */
   query: string;
   /** Retrieval focus hints passed through for the worker. */
   retrievalFocus: string[];
+  /** Curated search terms derived from the intent, focus, and tagged files. */
+  searchTerms: string[];
+  /** Tagged files passed through explicitly for worker-side boosting. */
+  taggedFiles: string[];
+}
+
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'do',
+  'does',
+  'for',
+  'from',
+  'how',
+  'i',
+  'in',
+  'into',
+  'is',
+  'it',
+  'make',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'our',
+  'please',
+  'should',
+  'that',
+  'the',
+  'their',
+  'this',
+  'to',
+  'use',
+  'want',
+  'we',
+  'what',
+  'with',
+  'would',
+]);
+
+function splitCamelCase(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9_./-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function tokenize(value: string): string[] {
+  return splitCamelCase(value)
+    .flatMap((part) => part.split(/[\/._-]+/))
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length >= 3 && !STOPWORDS.has(part));
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
 }
 
 /**
@@ -56,19 +120,29 @@ export interface AssembledPrompt {
  * tagged file context to produce a query the retriever worker can act on.
  */
 export function assembleRetrieverPrompt(input: PromptAssemblyInput): AssembledPrompt {
-  const parts: string[] = [input.restatedIntent];
+  const retrievalFocus = input.retrievalFocus ?? [];
+  const taggedFiles = input.taggedFiles ?? [];
 
-  if (input.retrievalFocus && input.retrievalFocus.length > 0) {
-    parts.push(`Focus areas: ${input.retrievalFocus.join(', ')}`);
-  }
+  const searchTerms = unique([
+    ...tokenize(input.restatedIntent),
+    ...retrievalFocus.flatMap(tokenize),
+    ...taggedFiles.flatMap(tokenize),
+    ...taggedFiles,
+    ...retrievalFocus,
+  ]);
 
-  if (input.taggedFiles && input.taggedFiles.length > 0) {
-    parts.push(`Tagged files: ${input.taggedFiles.join(', ')}`);
-  }
+  const querySections = [
+    `Objective: ${input.restatedIntent}`,
+    retrievalFocus.length > 0 ? `Focus areas: ${retrievalFocus.join(', ')}` : null,
+    taggedFiles.length > 0 ? `User-tagged files: ${taggedFiles.join(', ')}` : null,
+    searchTerms.length > 0 ? `Curated search terms: ${searchTerms.join(', ')}` : null,
+  ].filter((value): value is string => value !== null);
 
   return {
     systemPrompt: RETRIEVER_SYSTEM_PROMPT,
-    query: parts.join('\n'),
-    retrievalFocus: input.retrievalFocus ?? [],
+    query: querySections.join('\n'),
+    retrievalFocus,
+    searchTerms,
+    taggedFiles,
   };
 }
