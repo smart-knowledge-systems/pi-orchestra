@@ -10,9 +10,36 @@
  */
 
 import { resolve, isAbsolute } from 'node:path';
-import type { RetrievalIndexV1, RetrievalFile, RetrievalSymbol } from '../artifacts/types.ts';
+import type {
+  RetrievalDefaultEvidenceMode,
+  RetrievalFile,
+  RetrievalIndexV1,
+  RetrievalSelectionTier,
+  RetrievalSymbol,
+} from '../artifacts/types.ts';
 import { generateArtifactId } from '../artifacts/ids.ts';
 import { validateArtifact } from '../artifacts/schemas.ts';
+
+const SELECTION_TIERS: readonly RetrievalSelectionTier[] = ['selected', 'reserve'];
+const DEFAULT_EVIDENCE_MODES: readonly RetrievalDefaultEvidenceMode[] = [
+  'exclude',
+  'summary',
+  'summary+ast',
+  'spans',
+  'whole_file',
+];
+
+function coerceTier(value: unknown): RetrievalSelectionTier {
+  return SELECTION_TIERS.includes(value as RetrievalSelectionTier)
+    ? (value as RetrievalSelectionTier)
+    : 'selected';
+}
+
+function coerceEvidenceMode(value: unknown): RetrievalDefaultEvidenceMode {
+  return DEFAULT_EVIDENCE_MODES.includes(value as RetrievalDefaultEvidenceMode)
+    ? (value as RetrievalDefaultEvidenceMode)
+    : 'summary';
+}
 
 // ---------------------------------------------------------------------------
 // Raw worker output types — what the retriever worker produces before
@@ -44,6 +71,9 @@ export interface RawRetrievalFile {
   ast_skeleton?: string[];
   recommended_expansion?: string;
   expansion_reason?: string;
+  selection_tier?: RetrievalSelectionTier;
+  selection_reason?: string;
+  default_evidence_mode?: RetrievalDefaultEvidenceMode;
   symbols?: RawRetrievalSymbol[];
   /** raw_content is explicitly NOT propagated to the normalized artifact. */
   raw_content?: string;
@@ -56,6 +86,8 @@ export interface RawRetrievalOutput {
   cross_file_findings?: string[];
   gaps?: string[];
   followup_queries?: string[];
+  strategy_summary?: string;
+  scout_terms?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +158,9 @@ function normalizeFile(raw: RawRetrievalFile, repoRoot: string): RetrievalFile {
     ast_skeleton: raw.ast_skeleton ?? [],
     recommended_expansion: raw.recommended_expansion ?? 'none',
     expansion_reason: raw.expansion_reason ?? '',
-    selection_tier: 'selected',
-    selection_reason: '',
-    default_evidence_mode: 'summary',
+    selection_tier: coerceTier(raw.selection_tier),
+    selection_reason: raw.selection_reason ?? '',
+    default_evidence_mode: coerceEvidenceMode(raw.default_evidence_mode),
     symbols: (raw.symbols ?? []).map(normalizeSymbol),
   };
 }
@@ -164,8 +196,8 @@ export function normalizeRetrievalOutput(input: NormalizeInput): NormalizeResult
     intent_spec_id: intentSpecId,
     query: raw.query,
     confidence: raw.confidence ?? 'medium',
-    strategy_summary: '',
-    scout_terms: [],
+    strategy_summary: raw.strategy_summary ?? '',
+    scout_terms: raw.scout_terms ?? [],
     files: raw.files.map((f) => normalizeFile(f, repoRoot)),
     cross_file_findings: raw.cross_file_findings ?? [],
     gaps: raw.gaps ?? [],
