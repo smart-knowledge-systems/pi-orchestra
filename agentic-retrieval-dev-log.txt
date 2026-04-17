@@ -280,3 +280,49 @@ Both active Sprint 6 tasks are done. `bunx tsc --noEmit` clean; `bun test` 432 p
 **Files modified**: `extensions/conductor-extension.ts`, `src/util/budget.ts`, `tests/assembler/evidence-plan.test.ts`, `tests/assembler/budget.test.ts`, `tests/assembler/evidence-assembler.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
 
 No unfinished work in scope. AR-P7-* and AR-P8-* remain `planned`.
+
+===== 2026-04-17 | opus implement AR-P7-T1 + AR-P7-T2 + AR-P7-T3 =====
+All three active Sprint 7 tasks complete — narrow, deterministic conductor override API for evidence plans.
+
+**AR-P7-T1 — evidence-overrides.ts**
+- New `src/conductor/evidence-overrides.ts` with discriminated `EvidenceOverride` union covering `promote_file`, `demote_file`, `set_file_mode`, `include_symbol`, `exclude_symbol`, `set_neighbor_lines`, and the three `toggle_*` selection flags.
+- `applyEvidenceOverrides({ plan, retrieval_index, overrides })` deep-clones the input plan, applies each operation in order, validates every file_id and symbol_id against the retrieval artifact, and returns a fresh `evidence-plan-v1` with a new `artifact_id` plus an `applied[]` audit trail. Input plan is never mutated. Any invalid reference (unknown file, unknown symbol, promoting an already-planned file, demoting a file not in the plan, tuning a span that doesn't exist, negative neighbor_lines) throws deterministically — short-circuiting the entire override list so the source plan stays byte-identical.
+- Shared `modeToIncludeFlags(mode: RetrievalDefaultEvidenceMode)` helper matches `normalize.ts`/`worker.ts` semantics so override modes align with the retriever's own vocabulary. Promoting an `exclude`-mode reserve file defaults to `summary`-mode flags so promotion can never add an empty plan entry.
+
+**AR-P7-T2 — extension wiring**
+- `extensions/conductor-extension.ts`: Stage 4 now starts from `createDefaultEvidencePlan(index)` (retriever-authored), persists it, shows selected + reserve + recommendation state via `summarizeEvidencePlan`, then prompts the conductor to optionally apply narrow overrides. If the user says yes and provides a JSON array, `parseEvidenceOverridesInput` validates each op shape, `applyEvidenceOverrides` adjusts the plan (validated against the retrieval artifact), the adjusted plan is stored, and `evidence_plan_id` is rebound. Preview + materialize run against the adjusted plan.
+- Failure mode: on parse or validation error, the user sees `Overrides rejected — keeping retriever defaults.` and the flow continues with the retriever-authored default. No raw-file read capability is introduced — overrides work purely over structural plan + retrieval-index metadata.
+- `summarizeEvidencePlan` now shows `Selected files (in default plan)` and `Reserve candidates (not in default plan)` as distinct lists so the conductor review output clearly distinguishes selected vs reserve vs adjusted.
+- New `OVERRIDE_HELP` text + `VALID_OVERRIDE_OPS` guard keep the CLI help self-describing and reject typos before reaching `applyEvidenceOverrides`.
+
+**AR-P7-T3 — tests**
+- New `tests/assembler/evidence-overrides.test.ts` (33 tests). Success paths cover `modeToIncludeFlags` exhaustively, artifact_id regeneration, input-plan immutability, change isolation (unchanged fields/files remain byte-equal), reserve promotion with and without explicit mode, `exclude`-mode reserve promotion falling back to `summary`, `demote_file`, `set_file_mode`, `include_symbol` (new + re-enable + neighbor_lines update + fractional clamp), `exclude_symbol` removing the span, `set_neighbor_lines` on existing spans, and the three toggle flags. Multi-op sequencing (`promote_file` then `include_symbol`) proves ordering is deterministic. A schema round-trip test confirms the adjusted plan still validates.
+- Failure paths: unknown file_id / symbol_id for every op, promoting a file already in the plan, demoting a file not in the plan, `set_file_mode` on a file not in the plan, `include_symbol`/`exclude_symbol`/`set_neighbor_lines` on files/symbols not currently in the plan, negative `neighbor_lines`, and first-invalid-op rejection preserving the source plan byte-for-byte.
+- `tests/assembler/evidence-plan.test.ts`: +1 integration test confirming `createRecommendedEvidencePlan` output is directly consumable by `applyEvidenceOverrides` and reserve files can be promoted via the override path.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 466 pass / 0 fail (up from 432 — 34 net new tests).
+
+**Files modified**: `src/conductor/evidence-overrides.ts` (new), `extensions/conductor-extension.ts`, `tests/assembler/evidence-overrides.test.ts` (new), `tests/assembler/evidence-plan.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P8-* (docs + end-to-end regression) remain `planned` — out of active-task scope.
+
+===== 2026-04-17T22:17:11Z | opus implement =====
+All three AR-P7 tasks are complete.
+
+## Summary
+
+**AR-P7-T1 — `src/conductor/evidence-overrides.ts` (new)**
+Narrow, deterministic override API with a discriminated `EvidenceOverride` union: `promote_file` / `demote_file` / `set_file_mode` / `include_symbol` / `exclude_symbol` / `set_neighbor_lines` / `toggle_cross_file_findings` / `toggle_gaps` / `toggle_followup_queries`. `applyEvidenceOverrides` deep-clones the input plan, validates every file/symbol reference against the retrieval artifact, applies ops in order, and returns a fresh plan with a new `artifact_id` plus an `applied[]` audit trail. Invalid references throw and short-circuit the whole list, leaving the source plan byte-identical. Shared `modeToIncludeFlags` matches the retriever's normalize/worker vocabulary.
+
+**AR-P7-T2 — `extensions/conductor-extension.ts`**
+Stage 4 now starts from the retriever-authored default, presents selected vs reserve distinctly, prompts the conductor to optionally apply a JSON array of narrow overrides, adjusts the plan, re-stores it, and only then previews/materializes. Parse or validation errors surface as a warning and the flow falls back to the retriever default — no raw-file access added. New `OVERRIDE_HELP` + `VALID_OVERRIDE_OPS` guard self-describe the CLI interface.
+
+**AR-P7-T3 — tests**
+- New `tests/assembler/evidence-overrides.test.ts`: 33 tests covering modeToIncludeFlags, success paths (artifact_id regeneration, input-plan immutability, change isolation, reserve promotion with/without mode, `exclude`→`summary` fallback, demote, set mode, include/exclude/set neighbor_lines with fractional clamp, multi-op sequencing, schema round-trip, no-op list) and failure paths (unknown file/symbol, already-planned promote, not-in-plan demote, negative neighbor_lines, first-invalid-op preserves source).
+- `tests/assembler/evidence-plan.test.ts`: +1 integration test confirming `createRecommendedEvidencePlan` output is directly consumable by `applyEvidenceOverrides`.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` **466 pass / 0 fail** (up from 432 — 34 net new tests).
+
+**Files modified**: `src/conductor/evidence-overrides.ts` (new), `extensions/conductor-extension.ts`, `tests/assembler/evidence-overrides.test.ts` (new), `tests/assembler/evidence-plan.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+No unfinished work in scope. AR-P8-* (docs + end-to-end regression) remains `planned`.

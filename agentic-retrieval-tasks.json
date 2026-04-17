@@ -357,7 +357,7 @@
       "deliverable": "Deterministic evidence-plan override API for edge-case conductor adjustments",
       "files": ["src/conductor/evidence-overrides.ts", "src/conductor/evidence-plan.ts"],
       "dependencies": ["AR-P6-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Override helpers support file promotion/demotion, symbol inclusion/exclusion, and neighbor-line tuning",
         "Overrides validate file and symbol references against the retrieval artifact",
@@ -378,7 +378,7 @@
         "src/conductor/evidence-plan.ts"
       ],
       "dependencies": ["AR-P6-T2", "AR-P7-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "The evidence-stage path starts from retriever defaults and only then applies optional overrides",
         "Conductor review output clearly distinguishes selected files, reserve files, and adjusted inclusions",
@@ -398,7 +398,7 @@
         "tests/assembler/evidence-plan.test.ts"
       ],
       "dependencies": ["AR-P7-T1", "AR-P7-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Tests cover reserve-file promotion and span-level adjustment operations",
         "Invalid override targets fail loudly and deterministically",
