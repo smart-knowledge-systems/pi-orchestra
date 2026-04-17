@@ -364,3 +364,44 @@ Both active AR-P8 tasks are complete. Summary:
 - `tests/assembler/evidence-assembler.test.ts` (+1 test) showing `createRecommendedEvidencePlan` produces strictly narrower plan and bundle than summary-everything baseline.
 
 **Verification**: `bunx tsc --noEmit` clean; `bun test` 474 pass / 0 fail (up from 466). AR-P8-T1 and AR-P8-T2 flipped to `completed` in `agentic-retrieval-tasks.json`; dated entry appended to `agentic-retrieval-dev-log.txt`.
+
+===== 2026-04-17 | opus implement AR-P7-T4 + AR-P7-T5 + AR-P7-T6 =====
+Sprint 7 follow-up — closing the three semantic gaps between the override API and the assembler so overrides produce the evidence they advertise.
+
+**AR-P7-T4 — `set_file_mode` suppresses stale span evidence**
+- `src/conductor/evidence-overrides.ts`: `set_file_mode` case now clears `planFile.spans = []` when the new mode is `summary` or `summary+ast`, and splices the file out of `selection.files` entirely when the mode is `exclude`. `spans` and `whole_file` preserve spans (whole-file reads the file directly and the assembler ignores spans in that mode, so retention is harmless and lets a later `set_file_mode` flip back without relosing state). Root cause: the assembler's `resolveFileEvidence` materializes `planFile.spans.filter(s => s.include_span)` regardless of the plan flags, so flipping the flags without touching spans left stale raw evidence.
+
+**AR-P7-T5 — `promote_file` span-mode seeds spans or fails loudly**
+- `src/conductor/evidence-overrides.ts`: new internal `seedSpansFromRetrieval(index, file)` that prefers `recommended_evidence.files[file_id].spans` (filtered to `include_span === true`) and falls back to `file.symbols.filter(s => s.selected_by_default)` with their `default_neighbor_lines`. `promote_file` now calls it when the resolved mode is `spans`. If neither source yields a span, the override throws `promote_file: mode='spans' requires default spans in retrieval metadata for file "<id>", but none are available. Promote with mode='summary+ast' and follow with include_symbol operations, or pick a different mode.` The emitted `applied` line includes `spans=<n>` when seeding succeeded.
+
+**AR-P7-T6 — Evidence-stage summaries reflect adjusted plan state**
+- `src/conductor/evidence-overrides.ts`: new exported `deriveEffectiveFileMode(file)` — `whole_file` if `include_entire_file`, else `spans` if any span has `include_span`, else `summary+ast` if both summary + AST flags, else `summary` if only summary flag, else `exclude`.
+- `extensions/conductor-extension.ts`: `summarizeEvidencePlan` now derives `effectiveMode` from the plan file itself and labels each file as `effectiveMode (retriever default: retrievalMode)` when they differ, or just `effectiveMode` when they agree. Override `OVERRIDE_HELP` text updated to reflect the new semantics — `promote_file` with `mode='spans'` needs retrieval metadata, `set_file_mode` to `summary`/`summary+ast` clears spans, and `exclude` removes the file from the plan.
+
+**Test coverage**
+- `tests/assembler/evidence-overrides.test.ts` (+3 describe blocks, 18 new tests):
+  - `applyEvidenceOverrides — set_file_mode suppresses stale spans`: summary/summary+ast clear spans; spans/whole_file preserve them; exclude removes the file; re-entry after exclude fails; summary → `include_symbol` re-adds a specific span.
+  - `applyEvidenceOverrides — promote_file mode=spans behavior`: throws without a seed source; seeds from `selected_by_default` symbols; seeds from `recommended_evidence` after a demote+re-promote flow; non-spans modes don't trigger seeding; `default_evidence_mode: spans` without a seed also throws.
+  - `deriveEffectiveFileMode`: six cases covering each mode plus `include_span === false` spans being treated as inactive. Also switched two pre-existing tests that incidentally used `mode: 'spans'` to `mode: 'summary+ast'` (same include flags; the tests were about multi-op sequencing, not spans semantics, and the fixture had no seed source).
+- `tests/assembler/evidence-assembler.test.ts` (+3 end-to-end regressions): `set_file_mode → summary` on a file with existing spans materializes zero raw span evidence and no AST skeleton; `set_file_mode → exclude` removes the file from `structural_context.files` and `raw_evidence` entirely; `promote_file mode='spans'` on a reserve file with `selected_by_default` symbols produces concrete span evidence in the bundle.
+
+**Verification**: `bunx tsc --noEmit` clean; `bun test` **495 pass / 0 fail** (up from 474 — 21 net new tests).
+
+**Files modified**: `src/conductor/evidence-overrides.ts`, `extensions/conductor-extension.ts`, `tests/assembler/evidence-overrides.test.ts`, `tests/assembler/evidence-assembler.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+AR-P7-T4, AR-P7-T5, AR-P7-T6 flipped to `completed`. Sprint 7 is now fully closed — all override ops produce plan state that the assembler honors. Remaining open tasks in the tracker: AR-P8-T3 (agent-driven E2E coverage), AR-P8-T4 (docs/override-semantics reconciliation — can now be closed given AR-P7-T4/T5 are in), AR-P8-T5 (Stage 1 temp-dir cleanup).
+
+===== 2026-04-17T22:45:18Z | opus implement =====
+All three active Sprint 7 follow-up tasks (AR-P7-T4, AR-P7-T5, AR-P7-T6) are complete.
+
+**Changes**
+- `src/conductor/evidence-overrides.ts` — `set_file_mode` now clears stale spans on `summary`/`summary+ast` and splices out the file on `exclude`; `promote_file` with `mode='spans'` seeds from `recommended_evidence` → `selected_by_default` symbols and throws loudly with guidance when neither is available; new exported `deriveEffectiveFileMode` helper.
+- `extensions/conductor-extension.ts` — `summarizeEvidencePlan` labels each file from the effective plan state, with `(retriever default: X)` suffix when the plan diverges from retrieval; `OVERRIDE_HELP` text updated for the new semantics.
+- `tests/assembler/evidence-overrides.test.ts` — 3 new describe blocks (18 tests) plus two spans→summary+ast swaps for pre-existing sequencing tests.
+- `tests/assembler/evidence-assembler.test.ts` — 3 new end-to-end regressions proving the override semantics hit the materialized bundle.
+- `agentic-retrieval-tasks.json` — AR-P7-T4/T5/T6 flipped to `completed`.
+- `agentic-retrieval-dev-log.txt` — dated entry appended.
+
+**Verification**: `bunx tsc --noEmit` clean; `bun test` 495 pass / 0 fail (+21 from 474).
+
+**Note**: AR-P8-T4 (override docs/semantics reconciliation) was predicated on the gaps closed here; it's still listed as `planned` but the implementation half of its dependency chain is now landed.

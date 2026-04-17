@@ -464,7 +464,7 @@
         "tests/assembler/evidence-assembler.test.ts"
       ],
       "dependencies": ["AR-P7-T1", "AR-P7-T2", "AR-P7-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "set_file_mode to summary or summary+ast does not materialize previously selected raw spans unless they remain explicitly intended",
         "set_file_mode to exclude suppresses evidence for the target file rather than leaving stale span selections active",
@@ -486,7 +486,7 @@
         "tests/assembler/evidence-assembler.test.ts"
       ],
       "dependencies": ["AR-P7-T1", "AR-P7-T2", "AR-P7-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "promote_file with mode=spans no longer yields a spanless plan entry that materializes no raw span evidence",
         "User-facing override help text matches the implemented promote_file span semantics",
@@ -503,11 +503,72 @@
       "deliverable": "Evidence-stage summaries that reflect actual adjusted file modes and inclusions",
       "files": ["extensions/conductor-extension.ts"],
       "dependencies": ["AR-P7-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Summary labels derive from the current plan state rather than retrieval defaults when they differ",
         "Promoted reserve files and set_file_mode overrides show the effective mode in the conductor summary",
         "The evidence-stage review output stays consistent with the plan that will actually be previewed and materialized"
+      ]
+    },
+    {
+      "id": "AR-P8-T3",
+      "sprint": "Sprint 8",
+      "phase": 8,
+      "title": "Add end-to-end coverage for the bounded retriever-agent path",
+      "scope": "medium",
+      "description": "Extend interaction-level regression coverage so the end-to-end agentic retrieval flow exercises retrievalDispatch with a stubbed retrieverAgentModel, not only the scout-only fallback path.",
+      "deliverable": "End-to-end regression coverage for the agent-driven retrieval path and its downstream evidence plan",
+      "files": [
+        "tests/interaction/agentic-retrieval-flow.test.ts",
+        "tests/retriever/agent.test.ts",
+        "src/services/retrieval-dispatch.ts"
+      ],
+      "dependencies": ["AR-P4-T3", "AR-P8-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "An end-to-end test drives retrievalDispatch with a stubbed retrieverAgentModel rather than relying only on scout-only fallback",
+        "The agent-driven path proves that the stored retrieval artifact and recommended evidence plan reflect the narrower agent recommendation",
+        "Task completion makes the scope of AR-P8-T2 explicit by covering both scout-only and agent-driven retrieval paths"
+      ]
+    },
+    {
+      "id": "AR-P8-T4",
+      "sprint": "Sprint 8",
+      "phase": 8,
+      "title": "Reconcile override documentation with actual plan and assembler semantics",
+      "scope": "medium",
+      "description": "Align the formal docs with real override behavior so promote_file and set_file_mode are not documented as fully mode-complete while implementation still has stale-span and spanless-promotion gaps.",
+      "deliverable": "Docs and implementation terminology that agree on override semantics",
+      "files": [
+        "docs/specification/00-overview.md",
+        "docs/specification/03-prompts-and-protocol.md",
+        "docs/conductor-overview.md",
+        "src/conductor/evidence-overrides.ts",
+        "src/services/evidence-assembler.ts"
+      ],
+      "dependencies": ["AR-P7-T4", "AR-P7-T5", "AR-P8-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Documentation no longer claims override mode behavior that the current plan and assembler pipeline do not actually honor",
+        "promote_file and set_file_mode examples match implemented semantics, including span materialization behavior",
+        "A follow-up review can read docs and code without finding contradictions about override behavior"
+      ]
+    },
+    {
+      "id": "AR-P8-T5",
+      "sprint": "Sprint 8",
+      "phase": 8,
+      "title": "Clean up temporary directories in Stage 1 interaction tests",
+      "scope": "short",
+      "description": "Add explicit teardown coverage for Stage 1 interaction tests so mkdtemp-created directories are removed after each run and repeated test executions do not leak temp state.",
+      "deliverable": "Stage 1 interaction tests with deterministic temp-directory cleanup",
+      "files": ["tests/interaction/stage-1.test.ts"],
+      "dependencies": [],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Stage 1 interaction tests remove mkdtemp-created directories after each test run",
+        "Cleanup remains robust when tests fail mid-run",
+        "Repeated local or CI runs do not accumulate Stage 1 temp directories"
       ]
     }
   ]
