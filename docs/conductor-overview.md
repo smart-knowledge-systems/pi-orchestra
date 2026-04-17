@@ -147,7 +147,13 @@ The default plan is **authored by the retriever**. The conductor:
 - never reconstructs the plan from scratch and never adds new file-reading capability
 - picks the downstream task type
 
-Overrides are validated against the retrieval artifact. Unknown `file_id`s or `symbol_id`s fail loudly and the whole override list is rejected atomically, preserving the default plan byte-identical.
+A few override mode semantics are load-bearing and match the assembler:
+
+- `promote_file` with `mode: "spans"` seeds spans from retrieval metadata (`recommended_evidence.files[...].spans`, falling back to `selected_by_default` symbols). Without a seed source it throws — promote with `summary+ast` and add spans via `include_symbol` instead.
+- `set_file_mode` with `summary` / `summary+ast` clears any previously selected raw spans so flag changes stay in sync with emitted evidence.
+- `set_file_mode` with `exclude` removes the file from `selection.files` entirely. Re-entry requires another `promote_file`.
+
+Overrides are validated against the retrieval artifact. Unknown `file_id`s or `symbol_id`s (or missing span seeds for a `spans`-mode promotion) fail loudly and the whole override list is rejected atomically, preserving the default plan byte-identical.
 
 It then creates `evidence-plan-v1`. The plan embeds a reference to the retrieval index unchanged, and the actual raw materialization is left to the deterministic assembler.
 

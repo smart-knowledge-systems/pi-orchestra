@@ -79,6 +79,11 @@ The default evidence plan is **authored by the retriever**, not guessed by the c
 - optionally applies a narrow, deterministic set of **overrides** — promote/demote a file, tune file mode, add/remove/adjust symbol spans, toggle cross-file findings / gaps / followup queries
 - **never rebuilds the plan from scratch** and never adds new file-reading capability
 
+Override semantics are deliberately constrained so that plan state and emitted evidence stay in sync:
+
+- `promote_file` with `mode: "spans"` seeds concrete spans from retrieval metadata; with no seed available it throws loudly rather than producing a spanless span-mode entry.
+- `set_file_mode` to `summary` or `summary+ast` clears any previously selected raw spans on that file, and `exclude` removes the file from the plan entirely.
+
 The conductor produces `evidence-plan-v1` containing the retriever-authored selection (optionally patched) plus assembly and prompt-section options.
 
 ### Stage 5: Deterministic evidence assembly

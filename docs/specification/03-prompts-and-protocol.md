@@ -292,24 +292,34 @@ This reads `retrieval_index.recommended_evidence`:
 plan = applyEvidenceOverrides({ plan, retrieval_index, overrides })
 ```
 
-Supported overrides:
+Supported overrides and their exact semantics:
 
-- `promote_file` — move a reserve file into the plan with a chosen mode
-- `demote_file` — drop a selected file out of the plan
-- `set_file_mode` — change a selected file's mode
-- `include_symbol` / `exclude_symbol` — add or remove a specific symbol span
-- `set_neighbor_lines` — tune neighbor lines on an included span
-- `toggle_cross_file_findings` / `toggle_gaps` / `toggle_followup_queries`
+- `promote_file` — move a reserve file into the plan with a chosen mode.
+  - `mode` defaults to the file's `default_evidence_mode`; `exclude` falls back to `summary`.
+  - `mode: "spans"` seeds concrete spans from `recommended_evidence.files[file_id].spans` first, then from `file.symbols.filter(selected_by_default)` with their `default_neighbor_lines`. If neither source yields a span, the override **throws**. Use `mode: "summary+ast"` plus follow-up `include_symbol` ops instead.
+- `demote_file` — drop a selected file out of the plan.
+- `set_file_mode` — change a planned file's mode.
+  - `mode: "summary"` or `"summary+ast"` flips the file-level include flags **and clears `spans` on that plan file** so previously selected raw spans are not still materialized.
+  - `mode: "exclude"` **removes the file from the plan entirely** (splices it out of `selection.files`). Re-entering the plan requires another `promote_file`.
+  - `mode: "spans"` and `"whole_file"` preserve existing `spans` entries. In `whole_file` the assembler reads the full file and ignores spans, so retained spans are inert but let a later `set_file_mode` flip back without losing state.
+- `include_symbol` / `exclude_symbol` — add or remove a specific symbol span on a planned file. The target file must already be in the plan (promote first if needed).
+- `set_neighbor_lines` — tune neighbor lines on an included span.
+- `toggle_cross_file_findings` / `toggle_gaps` / `toggle_followup_queries`.
 
-Unknown `file_id`s or `symbol_id`s fail loudly. The entire override list is rejected atomically and the default plan is preserved byte-identical.
+Unknown `file_id`s or `symbol_id`s, missing retrieval span seeds for `promote_file` mode=`spans`, and targeting a file that is not (or is already) in the plan fail loudly. The entire override list is rejected atomically and the default plan is preserved byte-identical.
+
+The assembler materializes raw evidence from `planFile.spans.filter(s => s.include_span)` independently of the file-level summary / AST flags, so `set_file_mode` explicitly clears spans on summary modes to keep plan flags and emitted evidence in sync.
 
 ### 10.3 When to override
 
 - **Rarely.** Trust the retriever's defaults unless scope is obviously wrong.
 - Promote a reserve file only when the selected set plainly misses file-level behavior.
+- Promoting a reserve file in `mode: "spans"` only succeeds when retrieval metadata already nominates concrete default spans for it — otherwise promote with `summary+ast` and add spans with `include_symbol`.
 - Tune `neighbor_lines` when spans lack surrounding context.
 - Toggle gaps / followup queries on when the synthesizer needs to see retrieval uncertainty.
 - Request `whole_file` only when behavior is clearly distributed across a file and the retriever chose `spans`.
+- Use `set_file_mode` with `summary` / `summary+ast` to narrow a file whose spans turned out to be too aggressive — the override automatically drops those spans.
+- Use `set_file_mode` with `exclude` to drop a file outright; re-entering later requires `promote_file`.
 
 ### 10.4 Non-goals
 
