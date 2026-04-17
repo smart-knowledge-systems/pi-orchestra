@@ -329,7 +329,10 @@ async function resolveFileEvidence(
     totalLines += lines.length;
     spanCount++;
   } else {
-    // Resolve individual spans
+    // Raw spans materialize purely from planFile.spans with include_span=true.
+    // File-level summary / AST flags do not suppress them, so override ops
+    // that change the file mode must also clear spans (see
+    // src/conductor/evidence-overrides.ts — set_file_mode and promote_file).
     const enabledSpans = planFile.spans.filter((s) => s.include_span);
     if (enabledSpans.length > 0) {
       let resolved: ResolvedSpan[] = enabledSpans.map((s) => {

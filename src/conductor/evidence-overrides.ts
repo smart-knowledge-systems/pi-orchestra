@@ -6,6 +6,18 @@
  * retrieval artifact so unknown files or symbols fail loudly. The override API
  * is intentionally narrow — it is a patch layer for edge cases, not a
  * replacement for retriever planning.
+ *
+ * Two mode semantics are load-bearing and match the evidence assembler, which
+ * materializes raw spans from `planFile.spans.filter(s => s.include_span)`
+ * regardless of file-level summary / AST / whole-file flags:
+ *
+ * - `promote_file` with `mode: 'spans'` seeds concrete spans from retrieval
+ *   metadata (`recommended_evidence.files[file_id].spans`, falling back to
+ *   `file.symbols` entries flagged `selected_by_default`). If neither source
+ *   yields a span, the override throws rather than producing a spanless entry.
+ * - `set_file_mode` with `summary` or `summary+ast` clears stale span
+ *   selections on the plan file so flag changes stay in sync with emitted
+ *   evidence, and `exclude` removes the file from `selection.files` entirely.
  */
 
 import type {
