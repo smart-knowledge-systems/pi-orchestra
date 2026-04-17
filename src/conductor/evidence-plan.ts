@@ -213,3 +213,123 @@ export function verifyEmbeddedIndex(plan: EvidencePlanV1, storedIndex: Retrieval
     plan.retrieval_index.artifact_id === storedIndex.artifact_id
   );
 }
+
+// ---------------------------------------------------------------------------
+// Retriever-authored default plan
+// ---------------------------------------------------------------------------
+
+export interface CreateRecommendedEvidencePlanOptions {
+  /** Reserve files to promote into the default plan, identified by file_id. */
+  promote_reserve?: string[];
+  /** Assembly options override. Sensible defaults are applied if omitted. */
+  assembly_options?: Partial<AssemblyOptions>;
+  /** Prompt section toggles. Default: all true. */
+  prompt_sections?: Partial<PromptSections>;
+  /** Target task metadata. Default: analysis-report. */
+  target_task?: Partial<TargetTask>;
+}
+
+/**
+ * Build the default evidence plan straight from the retrieval artifact's
+ * retriever-authored `recommended_evidence` data. Reserve-tier files are
+ * excluded unless their `file_id` is passed via `promote_reserve`; in that
+ * case the promoted file is included as a summary-only entry so the
+ * conductor still expresses the promotion explicitly.
+ *
+ * The conductor does not guess summary/span defaults here — per-file
+ * inclusion flags and per-symbol neighbor_lines come directly from the
+ * retrieval artifact.
+ */
+export function createRecommendedEvidencePlan(
+  retrieval_index: RetrievalIndexV1,
+  options: CreateRecommendedEvidencePlanOptions = {},
+): EvidencePlanV1 {
+  const recommended = retrieval_index.recommended_evidence;
+  const recommendedFileIds = new Set(recommended.files.map((f) => f.file_id));
+  const filesById = new Map(retrieval_index.files.map((f) => [f.file_id, f]));
+
+  const planFiles: EvidencePlanFile[] = recommended.files.map((rec) => {
+    const indexFile = filesById.get(rec.file_id);
+    if (!indexFile) {
+      throw new Error(
+        `recommended_evidence references unknown file_id "${rec.file_id}" in retrieval-index-v1`,
+      );
+    }
+    const validSymbolIds = new Set(indexFile.symbols.map((s) => s.symbol_id));
+    const spans: EvidencePlanSpan[] = rec.spans.map((span) => {
+      if (!validSymbolIds.has(span.symbol_id)) {
+        throw new Error(
+          `recommended_evidence references unknown symbol_id "${span.symbol_id}" on file "${rec.file_id}"`,
+        );
+      }
+      return {
+        symbol_id: span.symbol_id,
+        include_span: span.include_span,
+        neighbor_lines: Math.max(0, Math.floor(span.neighbor_lines)),
+      };
+    });
+    return {
+      file_id: rec.file_id,
+      include_ast_skeleton: rec.include_ast_skeleton,
+      include_retriever_summary: rec.include_retriever_summary,
+      include_entire_file: rec.include_entire_file,
+      spans,
+    };
+  });
+
+  for (const promotedId of options.promote_reserve ?? []) {
+    if (recommendedFileIds.has(promotedId)) continue;
+    const indexFile = filesById.get(promotedId);
+    if (!indexFile) {
+      throw new Error(
+        `Cannot promote unknown reserve file_id "${promotedId}" — not present in retrieval-index-v1`,
+      );
+    }
+    if (indexFile.selection_tier !== 'reserve') {
+      throw new Error(`Cannot promote file_id "${promotedId}" — not a reserve-tier candidate`);
+    }
+    planFiles.push({
+      file_id: indexFile.file_id,
+      include_ast_skeleton: false,
+      include_retriever_summary: true,
+      include_entire_file: false,
+      spans: [],
+    });
+    recommendedFileIds.add(indexFile.file_id);
+  }
+
+  const selection: EvidencePlanSelection = {
+    files: planFiles,
+    include_cross_file_findings: recommended.include_cross_file_findings,
+    include_gaps: recommended.include_gaps,
+    include_followup_queries: recommended.include_followup_queries,
+  };
+
+  const assembly_options: AssemblyOptions = {
+    ...DEFAULT_ASSEMBLY_OPTIONS,
+    ...options.assembly_options,
+  };
+
+  const prompt_sections: PromptSections = {
+    ...DEFAULT_PROMPT_SECTIONS,
+    ...options.prompt_sections,
+  };
+
+  const target_task: TargetTask = {
+    ...DEFAULT_TARGET_TASK,
+    ...options.target_task,
+  };
+
+  return {
+    artifact_type: 'evidence-plan-v1',
+    artifact_id: generateArtifactId('evidence-plan-v1'),
+    retrieval_index: {
+      artifact_type: 'retrieval-index-v1',
+      artifact_id: retrieval_index.artifact_id,
+    },
+    selection,
+    assembly_options,
+    prompt_sections,
+    target_task,
+  };
+}
