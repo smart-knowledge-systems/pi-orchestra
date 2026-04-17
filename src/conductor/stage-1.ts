@@ -97,6 +97,7 @@ export class Stage1Controller {
       artifact_type: 'intent-capture-v1',
       artifact_id: id,
       user_intent_verbatim: userIntentVerbatim,
+      cleaned_user_intent: userIntentVerbatim,
       tagged_files: taggedFiles,
       timestamp: new Date().toISOString(),
     };
@@ -151,6 +152,7 @@ export class Stage1Controller {
       artifact_type: 'intent-capture-v1',
       artifact_id: newId,
       user_intent_verbatim: response.correction,
+      cleaned_user_intent: response.correction,
       tagged_files: this.intentCapture?.tagged_files ?? [],
       timestamp: new Date().toISOString(),
     };

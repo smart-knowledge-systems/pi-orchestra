@@ -109,6 +109,9 @@ function normalizeSymbol(raw: RawRetrievalSymbol): RetrievalSymbol {
     expansion_priority: raw.expansion_priority ?? 'medium',
     recommended_expansion: raw.recommended_expansion ?? 'none',
     expansion_reason: raw.expansion_reason ?? '',
+    selected_by_default: false,
+    default_neighbor_lines: 0,
+    selection_reason: '',
   };
 }
 
@@ -123,6 +126,9 @@ function normalizeFile(raw: RawRetrievalFile, repoRoot: string): RetrievalFile {
     ast_skeleton: raw.ast_skeleton ?? [],
     recommended_expansion: raw.recommended_expansion ?? 'none',
     expansion_reason: raw.expansion_reason ?? '',
+    selection_tier: 'selected',
+    selection_reason: '',
+    default_evidence_mode: 'summary',
     symbols: (raw.symbols ?? []).map(normalizeSymbol),
   };
 }
@@ -158,10 +164,18 @@ export function normalizeRetrievalOutput(input: NormalizeInput): NormalizeResult
     intent_spec_id: intentSpecId,
     query: raw.query,
     confidence: raw.confidence ?? 'medium',
+    strategy_summary: '',
+    scout_terms: [],
     files: raw.files.map((f) => normalizeFile(f, repoRoot)),
     cross_file_findings: raw.cross_file_findings ?? [],
     gaps: raw.gaps ?? [],
     followup_queries: raw.followup_queries ?? [],
+    recommended_evidence: {
+      files: [],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    },
   };
 
   const validation = validateArtifact(artifact);
