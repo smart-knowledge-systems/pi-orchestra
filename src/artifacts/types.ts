@@ -38,10 +38,19 @@ export interface ArtifactBase {
 // 1. intent-capture-v1
 // ---------------------------------------------------------------------------
 
+export type IntentFileRefSource = 'inline' | 'reference-only' | 'disk';
+
+export interface IntentFileRef {
+  path: string;
+  source: IntentFileRefSource;
+}
+
 export interface IntentCaptureV1 extends ArtifactBase {
   artifact_type: 'intent-capture-v1';
   user_intent_verbatim: string;
+  cleaned_user_intent: string;
   tagged_files: string[];
+  intent_file_refs?: IntentFileRef[];
   timestamp: string;
 }
 
@@ -117,7 +126,19 @@ export interface RetrievalSymbol {
   expansion_priority: string;
   recommended_expansion: string;
   expansion_reason: string;
+  selected_by_default: boolean;
+  default_neighbor_lines: number;
+  selection_reason: string;
 }
+
+export type RetrievalSelectionTier = 'selected' | 'reserve';
+
+export type RetrievalDefaultEvidenceMode =
+  | 'exclude'
+  | 'summary'
+  | 'summary+ast'
+  | 'spans'
+  | 'whole_file';
 
 export interface RetrievalFile {
   file_id: string;
@@ -127,7 +148,31 @@ export interface RetrievalFile {
   ast_skeleton: string[];
   recommended_expansion: string;
   expansion_reason: string;
+  selection_tier: RetrievalSelectionTier;
+  selection_reason: string;
+  default_evidence_mode: RetrievalDefaultEvidenceMode;
   symbols: RetrievalSymbol[];
+}
+
+export interface RecommendedEvidenceSpan {
+  symbol_id: string;
+  include_span: boolean;
+  neighbor_lines: number;
+}
+
+export interface RecommendedEvidenceFile {
+  file_id: string;
+  include_ast_skeleton: boolean;
+  include_retriever_summary: boolean;
+  include_entire_file: boolean;
+  spans: RecommendedEvidenceSpan[];
+}
+
+export interface RetrievalRecommendedEvidence {
+  files: RecommendedEvidenceFile[];
+  include_cross_file_findings: boolean;
+  include_gaps: boolean;
+  include_followup_queries: boolean;
 }
 
 export interface RetrievalIndexV1 extends ArtifactBase {
@@ -137,10 +182,13 @@ export interface RetrievalIndexV1 extends ArtifactBase {
   intent_spec_id: string | null;
   query: string;
   confidence: string;
+  strategy_summary: string;
+  scout_terms: string[];
   files: RetrievalFile[];
   cross_file_findings: string[];
   gaps: string[];
   followup_queries: string[];
+  recommended_evidence: RetrievalRecommendedEvidence;
 }
 
 // ---------------------------------------------------------------------------
