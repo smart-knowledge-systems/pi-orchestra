@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   applyEvidenceOverrides,
+  deriveEffectiveFileMode,
   modeToIncludeFlags,
   type EvidenceOverride,
 } from '../../src/conductor/evidence-overrides.ts';
@@ -376,7 +377,7 @@ describe('applyEvidenceOverrides — success paths', () => {
     const index = makeIndex();
     const plan = makePlan(index);
     const overrides: EvidenceOverride[] = [
-      { op: 'promote_file', file_id: 'f_reserve', mode: 'spans' },
+      { op: 'promote_file', file_id: 'f_reserve', mode: 'summary+ast' },
       { op: 'include_symbol', file_id: 'f_reserve', symbol_id: 's_reserve', neighbor_lines: 1 },
     ];
     const { plan: adjusted, applied } = applyEvidenceOverrides({
@@ -603,7 +604,7 @@ describe('applyEvidenceOverrides — change isolation', () => {
       plan,
       retrieval_index: index,
       overrides: [
-        { op: 'promote_file', file_id: 'f_reserve', mode: 'spans' },
+        { op: 'promote_file', file_id: 'f_reserve', mode: 'summary+ast' },
         {
           op: 'include_symbol',
           file_id: 'f_reserve',
@@ -644,5 +645,285 @@ describe('applyEvidenceOverrides — change isolation', () => {
     const s2 = f1.spans.find((s) => s.symbol_id === 's2')!;
     expect(s1).toEqual({ symbol_id: 's1', include_span: true, neighbor_lines: 4 });
     expect(s2.neighbor_lines).toBe(9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// set_file_mode suppresses stale span evidence (AR-P7-T4)
+// ---------------------------------------------------------------------------
+
+describe('applyEvidenceOverrides — set_file_mode suppresses stale spans', () => {
+  it('set_file_mode to summary clears previously selected raw spans', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    // The default plan has f1 with an active span on s1.
+    expect(plan.selection.files[0]!.spans).toHaveLength(1);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'summary' }],
+    });
+    const f1 = adjusted.selection.files.find((f) => f.file_id === 'f1')!;
+    expect(f1.spans).toEqual([]);
+    expect(f1.include_ast_skeleton).toBe(false);
+    expect(f1.include_retriever_summary).toBe(true);
+    expect(f1.include_entire_file).toBe(false);
+  });
+
+  it('set_file_mode to summary+ast clears previously selected raw spans', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'summary+ast' }],
+    });
+    const f1 = adjusted.selection.files.find((f) => f.file_id === 'f1')!;
+    expect(f1.spans).toEqual([]);
+    expect(f1.include_ast_skeleton).toBe(true);
+    expect(f1.include_retriever_summary).toBe(true);
+  });
+
+  it('set_file_mode to spans preserves existing spans', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'spans' }],
+    });
+    const f1 = adjusted.selection.files.find((f) => f.file_id === 'f1')!;
+    expect(f1.spans).toEqual(plan.selection.files[0]!.spans);
+  });
+
+  it('set_file_mode to whole_file preserves span entries (assembler ignores them)', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'whole_file' }],
+    });
+    const f1 = adjusted.selection.files.find((f) => f.file_id === 'f1')!;
+    expect(f1.include_entire_file).toBe(true);
+    expect(f1.spans).toEqual(plan.selection.files[0]!.spans);
+  });
+
+  it('set_file_mode to exclude removes the file from the plan entirely', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    const { plan: adjusted, applied } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'exclude' }],
+    });
+    expect(adjusted.selection.files.find((f) => f.file_id === 'f1')).toBeUndefined();
+    expect(applied[0]).toMatch(/set_file_mode f1 mode=exclude/);
+  });
+
+  it('subsequent include_symbol after set_file_mode to exclude fails because file was removed', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    expect(() =>
+      applyEvidenceOverrides({
+        plan,
+        retrieval_index: index,
+        overrides: [
+          { op: 'set_file_mode', file_id: 'f1', mode: 'exclude' },
+          { op: 'include_symbol', file_id: 'f1', symbol_id: 's1' },
+        ],
+      }),
+    ).toThrow(/not in the plan/);
+  });
+
+  it('set_file_mode to summary then include_symbol re-adds only the explicitly intended span', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [
+        { op: 'set_file_mode', file_id: 'f1', mode: 'summary' },
+        { op: 'include_symbol', file_id: 'f1', symbol_id: 's2', neighbor_lines: 1 },
+      ],
+    });
+    const f1 = adjusted.selection.files.find((f) => f.file_id === 'f1')!;
+    // s1 (previously a default span) is gone; s2 is the only active span.
+    expect(f1.spans.map((s) => s.symbol_id)).toEqual(['s2']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// promote_file mode=spans seeding + fail-loudly (AR-P7-T5)
+// ---------------------------------------------------------------------------
+
+describe('applyEvidenceOverrides — promote_file mode=spans behavior', () => {
+  it('throws when mode=spans has no default spans in retrieval metadata', () => {
+    const index = makeIndex();
+    const plan = makePlan(index);
+    // f_reserve has one symbol with selected_by_default=false and no
+    // recommended_evidence entry, so there are no concrete spans to seed.
+    expect(() =>
+      applyEvidenceOverrides({
+        plan,
+        retrieval_index: index,
+        overrides: [{ op: 'promote_file', file_id: 'f_reserve', mode: 'spans' }],
+      }),
+    ).toThrow(/mode='spans' requires default spans/);
+  });
+
+  it('seeds spans from selected_by_default symbols when promoting with mode=spans', () => {
+    const index = makeIndex();
+    // Mark the reserve symbol as a default-span candidate.
+    index.files[1]!.symbols[0]!.selected_by_default = true;
+    index.files[1]!.symbols[0]!.default_neighbor_lines = 2;
+    const plan = makePlan(index);
+    const { plan: adjusted, applied } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'promote_file', file_id: 'f_reserve', mode: 'spans' }],
+    });
+    const reserve = adjusted.selection.files.find((f) => f.file_id === 'f_reserve')!;
+    expect(reserve.spans).toEqual([
+      { symbol_id: 's_reserve', include_span: true, neighbor_lines: 2 },
+    ]);
+    expect(reserve.include_ast_skeleton).toBe(true);
+    expect(reserve.include_retriever_summary).toBe(true);
+    expect(applied[0]).toMatch(/spans=1/);
+  });
+
+  it('seeds spans from recommended_evidence entry when promoting with mode=spans', () => {
+    const index = makeIndex();
+    // After a demote/re-promote flow a selected-tier file may still have an
+    // entry in recommended_evidence even though it has been removed from the
+    // plan by a prior demote in the override list.
+    index.recommended_evidence.files.push({
+      file_id: 'f_reserve',
+      include_ast_skeleton: true,
+      include_retriever_summary: true,
+      include_entire_file: false,
+      spans: [{ symbol_id: 's_reserve', include_span: true, neighbor_lines: 3 }],
+    });
+    const plan = makePlan(index);
+    // The plan now already has f_reserve in its selection via
+    // recommended_evidence, so demote first, then re-promote with spans mode.
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [
+        { op: 'demote_file', file_id: 'f_reserve' },
+        { op: 'promote_file', file_id: 'f_reserve', mode: 'spans' },
+      ],
+    });
+    const reserve = adjusted.selection.files.find((f) => f.file_id === 'f_reserve')!;
+    expect(reserve.spans).toEqual([
+      { symbol_id: 's_reserve', include_span: true, neighbor_lines: 3 },
+    ]);
+  });
+
+  it('does not seed spans when promote_file uses a non-spans mode', () => {
+    const index = makeIndex();
+    index.files[1]!.symbols[0]!.selected_by_default = true;
+    index.files[1]!.symbols[0]!.default_neighbor_lines = 2;
+    const plan = makePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'promote_file', file_id: 'f_reserve', mode: 'summary+ast' }],
+    });
+    const reserve = adjusted.selection.files.find((f) => f.file_id === 'f_reserve')!;
+    expect(reserve.spans).toEqual([]);
+  });
+
+  it('throws when the resolved default is spans but no seed is available', () => {
+    const index = makeIndex();
+    // Reserve file's retrieval default is 'spans' but it has no seed data.
+    index.files[1]!.default_evidence_mode = 'spans';
+    const plan = makePlan(index);
+    expect(() =>
+      applyEvidenceOverrides({
+        plan,
+        retrieval_index: index,
+        overrides: [{ op: 'promote_file', file_id: 'f_reserve' }],
+      }),
+    ).toThrow(/mode='spans' requires default spans/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveEffectiveFileMode (AR-P7-T6)
+// ---------------------------------------------------------------------------
+
+describe('deriveEffectiveFileMode', () => {
+  it('returns whole_file when include_entire_file is true', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: false,
+        include_retriever_summary: false,
+        include_entire_file: true,
+        spans: [],
+      }),
+    ).toBe('whole_file');
+  });
+
+  it('returns spans when at least one span is active', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: true,
+        include_retriever_summary: true,
+        include_entire_file: false,
+        spans: [{ symbol_id: 's', include_span: true, neighbor_lines: 0 }],
+      }),
+    ).toBe('spans');
+  });
+
+  it('returns summary+ast when flags indicate both but no active spans', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: true,
+        include_retriever_summary: true,
+        include_entire_file: false,
+        spans: [],
+      }),
+    ).toBe('summary+ast');
+  });
+
+  it('returns summary when only retriever summary flag is set', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: false,
+        include_retriever_summary: true,
+        include_entire_file: false,
+        spans: [],
+      }),
+    ).toBe('summary');
+  });
+
+  it('returns exclude when no flags are set and no spans', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: false,
+        include_retriever_summary: false,
+        include_entire_file: false,
+        spans: [],
+      }),
+    ).toBe('exclude');
+  });
+
+  it('ignores spans with include_span=false when deriving mode', () => {
+    expect(
+      deriveEffectiveFileMode({
+        file_id: 'x',
+        include_ast_skeleton: true,
+        include_retriever_summary: true,
+        include_entire_file: false,
+        spans: [{ symbol_id: 's', include_span: false, neighbor_lines: 0 }],
+      }),
+    ).toBe('summary+ast');
   });
 });

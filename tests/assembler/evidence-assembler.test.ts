@@ -13,6 +13,7 @@ import {
   createEvidencePlan,
   createRecommendedEvidencePlan,
 } from '../../src/conductor/evidence-plan.ts';
+import { applyEvidenceOverrides } from '../../src/conductor/evidence-overrides.ts';
 import type {
   RetrievalIndexV1,
   EvidencePlanV1,
@@ -779,5 +780,156 @@ describe('evidence assembler — materialize mode', () => {
     for (const f of recommendedBundle!.structural_context.files) {
       expect(f.path).toContain('main.ts');
     }
+  });
+});
+
+describe('evidence assembler — override semantics regression', () => {
+  it('set_file_mode to summary on a file with existing spans materializes no raw span evidence', async () => {
+    await setupRepoFiles();
+    const index = makeIndex();
+    // Retriever-authored default: f1 in spans mode with s1 active.
+    index.files[0]!.default_evidence_mode = 'spans';
+    index.files[0]!.symbols[0]!.selected_by_default = true;
+    index.recommended_evidence = {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 0 }],
+        },
+      ],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+
+    const basePlan = createRecommendedEvidencePlan(index);
+    expect(basePlan.selection.files[0]!.spans.length).toBeGreaterThan(0);
+
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan: basePlan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'summary' }],
+    });
+    await seedArtifacts(index, adjusted);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: adjusted.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+
+    expect(result.status).toBe('success');
+    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    expect(bundle!.raw_evidence.filter((e) => e.kind === 'span')).toHaveLength(0);
+    expect(bundle!.raw_evidence).toHaveLength(0);
+    expect(bundle!.stats.spans).toBe(0);
+    expect(bundle!.structural_context.files[0]!.file_summary).toBe('Main application entry point');
+    expect(bundle!.structural_context.files[0]!.ast_skeleton).toEqual([]);
+  });
+
+  it('set_file_mode to exclude on a file with existing spans removes the file from the bundle entirely', async () => {
+    await setupRepoFiles();
+    const index = makeIndex();
+    // Promote both files into the default plan so we can assert f1 drops out.
+    index.files[0]!.default_evidence_mode = 'spans';
+    index.files[0]!.symbols[0]!.selected_by_default = true;
+    index.recommended_evidence = {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 0 }],
+        },
+        {
+          file_id: 'f2',
+          include_ast_skeleton: false,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [],
+        },
+      ],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+
+    const basePlan = createRecommendedEvidencePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan: basePlan,
+      retrieval_index: index,
+      overrides: [{ op: 'set_file_mode', file_id: 'f1', mode: 'exclude' }],
+    });
+    await seedArtifacts(index, adjusted);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: adjusted.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+
+    expect(result.status).toBe('success');
+    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const paths = bundle!.structural_context.files.map((f) => f.path);
+    for (const p of paths) {
+      expect(p).not.toContain('main.ts');
+    }
+    for (const ev of bundle!.raw_evidence) {
+      expect(ev.path).not.toContain('main.ts');
+    }
+    expect(bundle!.structural_context.files).toHaveLength(1);
+    expect(bundle!.structural_context.files[0]!.path).toContain('utils.ts');
+  });
+
+  it('promote_file mode=spans seeds concrete span evidence from retrieval metadata', async () => {
+    await setupRepoFiles();
+    const index = makeIndex();
+    // Reserve f2 so the default plan doesn't include it, then promote it in
+    // spans mode. selected_by_default on s3 seeds the concrete span.
+    index.files[1]!.selection_tier = 'reserve';
+    index.files[1]!.default_evidence_mode = 'exclude';
+    index.files[1]!.symbols[0]!.selected_by_default = true;
+    index.files[1]!.symbols[0]!.default_neighbor_lines = 1;
+    index.recommended_evidence = {
+      files: [],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+
+    const basePlan = createRecommendedEvidencePlan(index);
+    const { plan: adjusted } = applyEvidenceOverrides({
+      plan: basePlan,
+      retrieval_index: index,
+      overrides: [{ op: 'promote_file', file_id: 'f2', mode: 'spans' }],
+    });
+    await seedArtifacts(index, adjusted);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: adjusted.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+
+    expect(result.status).toBe('success');
+    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const utilsSpans = bundle!.raw_evidence.filter(
+      (e) => e.kind === 'span' && e.path.includes('utils.ts'),
+    );
+    expect(utilsSpans.length).toBeGreaterThan(0);
+    expect(utilsSpans[0]!.content).toContain('formatDate');
   });
 });
