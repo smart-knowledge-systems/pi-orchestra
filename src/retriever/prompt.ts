@@ -5,8 +5,15 @@
  * This module defines the system prompt and assembles the user-facing query
  * prompt from intent artifacts. The conductor must NOT import this module.
  *
+ * Curated search terms are sourced from the deterministic scout in
+ * `./scout.ts`, so the prompt and the scout share the same intent-shaped
+ * term model (focus > tagged > restatement > intent) and the same
+ * stop-word handling.
+ *
  * @module retriever/prompt
  */
+
+import { buildScoutTerms } from './scout.ts';
 
 // ---------------------------------------------------------------------------
 // System prompt — instructs the retriever worker's behavior
@@ -42,6 +49,12 @@ export interface PromptAssemblyInput {
   retrievalFocus?: string[];
   /** Optional tagged files from the intent capture. */
   taggedFiles?: string[];
+  /**
+   * Optional curated terms pre-computed by the scout. When supplied the
+   * prompt reuses them verbatim rather than recomputing; this keeps scout
+   * output and prompt content in lockstep.
+   */
+  scoutTerms?: string[];
 }
 
 export interface AssembledPrompt {
@@ -57,66 +70,6 @@ export interface AssembledPrompt {
   taggedFiles: string[];
 }
 
-const STOPWORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'as',
-  'at',
-  'be',
-  'by',
-  'do',
-  'does',
-  'for',
-  'from',
-  'how',
-  'i',
-  'in',
-  'into',
-  'is',
-  'it',
-  'make',
-  'me',
-  'my',
-  'of',
-  'on',
-  'or',
-  'our',
-  'please',
-  'should',
-  'that',
-  'the',
-  'their',
-  'this',
-  'to',
-  'use',
-  'want',
-  'we',
-  'what',
-  'with',
-  'would',
-]);
-
-function splitCamelCase(value: string): string[] {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .split(/[^A-Za-z0-9_./-]+/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-}
-
-function tokenize(value: string): string[] {
-  return splitCamelCase(value)
-    .flatMap((part) => part.split(/[\/._-]+/))
-    .map((part) => part.trim().toLowerCase())
-    .filter((part) => part.length >= 3 && !STOPWORDS.has(part));
-}
-
-function unique<T>(values: T[]): T[] {
-  return [...new Set(values)];
-}
-
 /**
  * Assemble the retriever prompt from intent artifacts.
  *
@@ -127,18 +80,20 @@ export function assembleRetrieverPrompt(input: PromptAssemblyInput): AssembledPr
   const retrievalFocus = input.retrievalFocus ?? [];
   const taggedFiles = input.taggedFiles ?? [];
 
-  const searchTerms = unique([
-    ...tokenize(input.restatedIntent),
-    ...retrievalFocus.flatMap(tokenize),
-    ...taggedFiles.flatMap(tokenize),
-    ...taggedFiles,
-    ...retrievalFocus,
-  ]);
+  const searchTerms =
+    input.scoutTerms && input.scoutTerms.length > 0
+      ? [...input.scoutTerms]
+      : buildScoutTerms({
+          cleanedIntent: input.userIntentVerbatim,
+          restatedIntent: input.restatedIntent,
+          retrievalFocus,
+          taggedFiles,
+        }).map((t) => t.term);
 
   const querySections = [
     `Objective: ${input.restatedIntent}`,
     retrievalFocus.length > 0 ? `Focus areas: ${retrievalFocus.join(', ')}` : null,
-    taggedFiles.length > 0 ? `User-tagged files: ${taggedFiles.join(', ')}` : null,
+    taggedFiles.length > 0 ? `Tagged files: ${taggedFiles.join(', ')}` : null,
     searchTerms.length > 0 ? `Curated search terms: ${searchTerms.join(', ')}` : null,
   ].filter((value): value is string => value !== null);
 
