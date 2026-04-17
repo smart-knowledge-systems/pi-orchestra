@@ -27,6 +27,7 @@ import type {
 import { createRecommendedEvidencePlan } from '../src/conductor/evidence-plan.ts';
 import {
   applyEvidenceOverrides,
+  deriveEffectiveFileMode,
   type EvidenceOverride,
 } from '../src/conductor/evidence-overrides.ts';
 import { ExpansionController, type ExpansionReviewResponse } from '../src/conductor/expansion.ts';
@@ -213,7 +214,12 @@ function summarizeEvidencePlan(
   const planFileIds = new Set(plan.selection.files.map((f) => f.file_id));
   const fileSummaries = plan.selection.files.slice(0, 8).map((file) => {
     const match = index.files.find((candidate) => candidate.file_id === file.file_id);
-    const mode = match?.default_evidence_mode ?? 'summary';
+    const effectiveMode = deriveEffectiveFileMode(file);
+    const retrievalMode = match?.default_evidence_mode;
+    const modeLabel =
+      retrievalMode && retrievalMode !== effectiveMode
+        ? `${effectiveMode} (retriever default: ${retrievalMode})`
+        : effectiveMode;
     const includedSpans = file.spans.filter((s) => s.include_span).length;
     const flags = [
       file.include_entire_file ? 'whole' : null,
@@ -223,7 +229,7 @@ function summarizeEvidencePlan(
     ]
       .filter(Boolean)
       .join(', ');
-    return `${match?.path ?? file.file_id} [${mode}] — ${flags || 'exclude'}`;
+    return `${match?.path ?? file.file_id} [${modeLabel}] — ${flags || 'exclude'}`;
   });
 
   const reserveLines = reserveFiles
@@ -246,8 +252,12 @@ const OVERRIDE_HELP = [
   'Provide a JSON array of narrow override operations, or leave empty to keep retriever defaults.',
   'Supported ops:',
   '  { "op": "promote_file", "file_id": "...", "mode"?: "summary"|"summary+ast"|"spans"|"whole_file" }',
+  '    - mode="spans" only works when retrieval metadata has default spans for this file.',
+  '      Otherwise use mode="summary+ast" and follow with include_symbol operations.',
   '  { "op": "demote_file", "file_id": "..." }',
   '  { "op": "set_file_mode", "file_id": "...", "mode": "summary"|"summary+ast"|"spans"|"whole_file"|"exclude" }',
+  '    - mode="summary" / "summary+ast" clears any previously selected raw spans.',
+  '    - mode="exclude" removes the file from the plan entirely.',
   '  { "op": "include_symbol", "file_id": "...", "symbol_id": "...", "neighbor_lines"?: 0 }',
   '  { "op": "exclude_symbol", "file_id": "...", "symbol_id": "..." }',
   '  { "op": "set_neighbor_lines", "file_id": "...", "symbol_id": "...", "neighbor_lines": 3 }',

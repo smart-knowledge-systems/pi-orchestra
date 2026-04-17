@@ -20,6 +20,24 @@ import type {
 import { generateArtifactId } from '../artifacts/ids.ts';
 
 // ---------------------------------------------------------------------------
+// Effective mode derivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the effective RetrievalDefaultEvidenceMode for a plan file from its
+ * current include flags and spans. Used so conductor summaries reflect the
+ * adjusted plan rather than the retriever's original default.
+ */
+export function deriveEffectiveFileMode(file: EvidencePlanFile): RetrievalDefaultEvidenceMode {
+  if (file.include_entire_file) return 'whole_file';
+  const hasActiveSpan = file.spans.some((s) => s.include_span);
+  if (hasActiveSpan) return 'spans';
+  if (file.include_ast_skeleton && file.include_retriever_summary) return 'summary+ast';
+  if (file.include_retriever_summary) return 'summary';
+  return 'exclude';
+}
+
+// ---------------------------------------------------------------------------
 // Override operations
 // ---------------------------------------------------------------------------
 
@@ -149,6 +167,35 @@ function requirePositiveNeighborLines(value: number, opLabel: string): number {
   return Math.max(0, Math.floor(value));
 }
 
+/**
+ * Attempt to seed concrete default spans for a file being promoted in
+ * mode='spans'. First prefers an entry in `recommended_evidence` (unusual for
+ * reserve files but possible for re-promotion of a previously demoted
+ * selected-tier file), then falls back to symbols flagged
+ * `selected_by_default`. Returns `[]` when no concrete span seed is available
+ * — the caller decides how to report that.
+ */
+function seedSpansFromRetrieval(index: RetrievalIndexV1, file: RetrievalFile): EvidencePlanSpan[] {
+  const recFile = index.recommended_evidence.files.find((f) => f.file_id === file.file_id);
+  if (recFile) {
+    const seeded = recFile.spans
+      .filter((s) => s.include_span)
+      .map((s) => ({
+        symbol_id: s.symbol_id,
+        include_span: true,
+        neighbor_lines: Math.max(0, Math.floor(s.neighbor_lines)),
+      }));
+    if (seeded.length > 0) return seeded;
+  }
+  return file.symbols
+    .filter((s) => s.selected_by_default)
+    .map((s) => ({
+      symbol_id: s.symbol_id,
+      include_span: true,
+      neighbor_lines: Math.max(0, Math.floor(s.default_neighbor_lines)),
+    }));
+}
+
 function findPlanFileIndex(files: EvidencePlanFile[], file_id: string): number {
   return files.findIndex((f) => f.file_id === file_id);
 }
@@ -222,15 +269,27 @@ export function applyEvidenceOverrides(
           (indexFile.default_evidence_mode === 'exclude'
             ? 'summary'
             : indexFile.default_evidence_mode);
+        const seededSpans =
+          mode === 'spans' ? seedSpansFromRetrieval(retrieval_index, indexFile) : [];
+        if (mode === 'spans' && seededSpans.length === 0) {
+          throw new Error(
+            `promote_file: mode='spans' requires default spans in retrieval metadata for file "${override.file_id}", but none are available. ` +
+              `Promote with mode='summary+ast' and follow with include_symbol operations, or pick a different mode.`,
+          );
+        }
         const flags = modeToIncludeFlags(mode);
         working.selection.files.push({
           file_id: indexFile.file_id,
           include_ast_skeleton: flags.include_ast_skeleton,
           include_retriever_summary: flags.include_retriever_summary,
           include_entire_file: flags.include_entire_file,
-          spans: [],
+          spans: seededSpans,
         });
-        applied.push(`promote_file ${override.file_id} mode=${mode}`);
+        applied.push(
+          seededSpans.length > 0
+            ? `promote_file ${override.file_id} mode=${mode} spans=${seededSpans.length}`
+            : `promote_file ${override.file_id} mode=${mode}`,
+        );
         break;
       }
 
@@ -253,11 +312,23 @@ export function applyEvidenceOverrides(
             `set_file_mode: file_id "${override.file_id}" is not in the plan — promote it first`,
           );
         }
+        if (override.mode === 'exclude') {
+          working.selection.files.splice(idx, 1);
+          applied.push(`set_file_mode ${override.file_id} mode=exclude (removed from plan)`);
+          break;
+        }
         const flags = modeToIncludeFlags(override.mode);
         const planFile = working.selection.files[idx]!;
         planFile.include_ast_skeleton = flags.include_ast_skeleton;
         planFile.include_retriever_summary = flags.include_retriever_summary;
         planFile.include_entire_file = flags.include_entire_file;
+        // Clear stale span selections when the new mode does not materialize
+        // raw spans. 'spans' keeps them; 'whole_file' reads the entire file and
+        // the assembler ignores span entries in that mode, so leaving them is
+        // harmless and lets the conductor flip back without losing state.
+        if (override.mode === 'summary' || override.mode === 'summary+ast') {
+          planFile.spans = [];
+        }
         applied.push(`set_file_mode ${override.file_id} mode=${override.mode}`);
         break;
       }
