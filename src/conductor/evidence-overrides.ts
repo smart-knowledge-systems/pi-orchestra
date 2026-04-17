@@ -147,6 +147,10 @@ export function modeToIncludeFlags(mode: RetrievalDefaultEvidenceMode): IncludeF
         include_retriever_summary: false,
         include_entire_file: false,
       };
+    default:
+      throw new Error(
+        `invalid mode "${String(mode)}" — expected one of: exclude, summary, summary+ast, spans, whole_file`,
+      );
   }
 }
 

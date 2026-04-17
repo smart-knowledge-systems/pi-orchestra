@@ -167,6 +167,12 @@ describe('modeToIncludeFlags', () => {
       include_entire_file: false,
     });
   });
+
+  it('throws a descriptive error for an unknown mode string', () => {
+    expect(() =>
+      modeToIncludeFlags('banana' as unknown as Parameters<typeof modeToIncludeFlags>[0]),
+    ).toThrow(/invalid mode "banana"/);
+  });
 });
 
 describe('applyEvidenceOverrides — success paths', () => {
