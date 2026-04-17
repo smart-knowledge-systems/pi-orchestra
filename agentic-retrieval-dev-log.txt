@@ -155,3 +155,49 @@ Sprint 4 active tasks (AR-P4-T1, T2, T3) are complete.
 **Verification**: `bunx tsc --noEmit` clean; `bun test` 395 pass / 0 fail.
 
 **Not done (by design)**: AR-P4-T4 (agent-loop tests) and AR-P4-T5 remain `planned` — out of active-task scope.
+
+===== 2026-04-17T21:54Z | opus implement AR-P4-T4 + AR-P5-T1 =====
+Two active tasks complete: retriever-agent test suite and recommended-evidence normalization.
+
+**AR-P5-T1 — structural recommended_evidence in normalization**
+`src/retriever/normalize.ts` now builds `recommended_evidence` from the normalized file set:
+- `RawRetrievalSymbol` gained `selected_by_default`, `default_neighbor_lines`, `selection_reason` (defaulting to false/0/"" when absent).
+- `RawRetrievalFile` gained `include_ast_skeleton`, `include_retriever_summary`, `include_entire_file` overrides; when absent they derive from `default_evidence_mode` via `defaultIncludeFlags` (`whole_file` → all true; `spans`/`summary+ast` → ast+summary only; `summary` → summary only; `exclude` → all false).
+- `RawRetrievalOutput` gained `include_cross_file_findings`, `include_gaps`, `include_followup_queries` overrides (defaulting to `length > 0` / `false`).
+- `normalizeFile` returns `{ file, includeFlags }` so `buildRecommendedEvidence` can filter to selected-tier non-exclude files and emit per-symbol spans for `selected_by_default=true` symbols using the canonical file_id/symbol_id assigned during normalization. Reserve-tier and `exclude`-mode files are deliberately absent from `recommended_evidence` — they require explicit conductor override to enter the plan.
+- Path and line-number enforcement preserved; `raw_content` still stripped; discriminated `NormalizeResult` unchanged.
+
+`src/retriever/worker.ts` propagates the new fields end-to-end:
+- `candidateToRawFile` sets per-file include flags from `includeFlagsForMode(evidenceModeHint)` and marks the scout's top symbol as `selected_by_default=true` with `default_neighbor_lines=3` when the file is selected-tier in `spans`/`whole_file` mode with a sufficiently scored top symbol.
+- `agentSymbolToRaw` / `agentFileToRawFile` / `agentToRawOutput` carry through the new agent-authored selection fields (including the three top-level include flags) without leaking any raw file bodies.
+
+No schema version bump required — `src/artifacts/schemas.ts` already validated the recommended_evidence shape from AR-P1-T1/T2.
+
+**AR-P4-T4 — retriever-agent tests**
+New `tests/retriever/agent.test.ts` (10 tests) uses `runScout` against real temp repos plus a queue-backed `AgentModelCallback` to exercise the bounded agent loop without any pi-host dependency:
+- `maxRounds` cap honoured even when the model refuses to stop (`stopReason: round_cap`, scout-synthesized fallback).
+- `maxActionsPerRound` drops extras.
+- `read_file` flows through the executor and returns the expected line slice with `totalLines`, bounded by 1-indexed `start`.
+- `follow_imports` resolves `./…` specifiers inside the repo and leaves external packages unresolved.
+- Stop reasons: `agent_stopped` on valid recommendation, `action_cap` on empty continue, `model_error` when the callback throws, `parse_error` on non-JSON output.
+- False-positive rejection: agent drops a distracting scout candidate and cites the reason in `strategy_summary`.
+- `sanitizeRecommendation` removes an out-of-repo `/etc/passwd` entry and records a warning.
+
+`tests/retriever/retrieval-index.test.ts` grew two groups:
+- `normalizeRetrievalOutput recommended_evidence`: asserts include-flag derivation per mode, reserve-tier omission, exclude-mode omission, `whole_file` mode, and the top-level include-flag defaulting/override rules.
+- `runRetrieverWorkerDetailed with stubbed model`: runs scout-only and agent-driven worker passes against a three-file fixture with two distractor handlers; confirms the agent-driven selected set is a strict subset of scout's, the real handler wins, and the downstream normalized artifact's `recommended_evidence` contains exactly one file with its default spans (`include_span=true`, `neighbor_lines=2`).
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 411 pass / 0 fail (up from 395 — new tests are additive).
+
+**Files modified**: `src/retriever/normalize.ts`, `src/retriever/worker.ts`, `tests/retriever/agent.test.ts` (new), `tests/retriever/retrieval-index.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P4-T5 and Sprint 5 tasks AR-P5-T2/T3 remain `planned` — out of active-task scope.
+
+===== 2026-04-17T21:55:26Z | opus implement =====
+Both active tasks complete.
+
+**AR-P4-T4** — New `tests/retriever/agent.test.ts` (10 tests) covers bounded behavior (`maxRounds`, `maxActionsPerRound`), `read_file`/`follow_imports` executor flow, all five stop reasons, false-positive rejection, and out-of-repo path sanitization. `tests/retriever/retrieval-index.test.ts` gained a `runRetrieverWorkerDetailed` integration test verifying the agent-driven selected set is a strict subset of scout-only and that `recommended_evidence` carries the narrowed plan end-to-end.
+
+**AR-P5-T1** — `src/retriever/normalize.ts` now builds `recommended_evidence` from normalized file ids, filtering to selected-tier non-exclude files and emitting per-symbol spans for `selected_by_default` symbols. Raw worker/agent outputs propagate the new include flags through `src/retriever/worker.ts`. Path/line enforcement and `raw_content` stripping preserved.
+
+Verification: `bunx tsc --noEmit` clean; `bun test` 411 pass / 0 fail (up from 395). Task statuses flipped to `completed` in `agentic-retrieval-tasks.json` and a dated entry appended to `agentic-retrieval-dev-log.txt`. AR-P4-T5 and AR-P5-T2/T3 left as `planned` per scope.

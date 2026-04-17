@@ -225,7 +225,7 @@
       "deliverable": "Retriever-agent regression suite covering bounded multi-round behavior",
       "files": ["tests/retriever/agent.test.ts", "tests/retriever/retrieval-index.test.ts"],
       "dependencies": ["AR-P4-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Tests prove the retriever agent stops within configured bounds",
         "Tests cover file-read actions, import following, and false-positive rejection",
@@ -242,7 +242,7 @@
       "deliverable": "Normalized retrieval artifacts that remain structural-only while expressing default evidence scope",
       "files": ["src/retriever/normalize.ts", "src/artifacts/types.ts", "src/artifacts/schemas.ts"],
       "dependencies": ["AR-P1-T2", "AR-P4-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Normalized retrieval artifacts contain strategy summary, selection tiers, and recommended_evidence",
         "No raw file bodies from the retriever agent leak into stored artifacts",
