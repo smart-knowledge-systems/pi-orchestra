@@ -421,15 +421,42 @@ function createDefaultEvidencePlan(index: RetrievalIndexV1) {
 function summarizeInspection(
   inspection: NonNullable<Awaited<ReturnType<typeof inspectRetrievalResult>>['inspection']>,
 ) {
-  const fileLines = inspection.files
+  const selectedFiles = inspection.files.filter((f) => f.selection_tier === 'selected');
+  const reserveFiles = inspection.files.filter((f) => f.selection_tier === 'reserve');
+
+  const selectedLines = selectedFiles
+    .slice(0, 8)
+    .map(
+      (file) =>
+        `${file.path} [${file.default_evidence_mode}] — ${file.selection_reason || file.why_relevant} (${file.symbol_count} symbols)`,
+    );
+
+  const reserveLines = reserveFiles
     .slice(0, 5)
-    .map((file) => `${file.path} — ${file.why_relevant} (${file.symbol_count} symbols)`);
+    .map((file) => `${file.path} — ${file.selection_reason || file.why_relevant}`);
+
+  const rec = inspection.recommended_evidence;
+  const recommendedSymbolCount = rec.files.reduce(
+    (total, file) => total + file.spans.filter((s) => s.include_span).length,
+    0,
+  );
+  const recommendedLines = [
+    `Files in default plan: ${rec.files.length}`,
+    `Selected symbol spans: ${recommendedSymbolCount}`,
+    `Cross-file findings: ${rec.include_cross_file_findings ? 'yes' : 'no'}`,
+    `Gaps: ${rec.include_gaps ? 'yes' : 'no'}`,
+    `Follow-up queries: ${rec.include_followup_queries ? 'yes' : 'no'}`,
+  ];
 
   return [
     `Query: ${inspection.query}`,
     `Confidence: ${inspection.confidence}`,
-    `Files reviewed: ${inspection.file_count}`,
-    formatList('Top files', fileLines),
+    inspection.strategy_summary ? `Strategy: ${inspection.strategy_summary}` : 'Strategy: (none)',
+    `Scout terms: ${inspection.scout_terms.length > 0 ? inspection.scout_terms.slice(0, 8).join(', ') : 'none'}`,
+    `Files reviewed: ${inspection.file_count} (selected=${inspection.selected_file_count}, reserve=${inspection.reserve_file_count})`,
+    formatList('Selected files', selectedLines, 8),
+    formatList('Reserve candidates', reserveLines, 5),
+    formatList('Recommended default evidence scope', recommendedLines, recommendedLines.length),
     formatList('Cross-file findings', inspection.cross_file_findings),
     formatList('Gaps', inspection.gaps),
     formatList('Follow-up queries', inspection.followup_queries),
