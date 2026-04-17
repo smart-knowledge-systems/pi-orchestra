@@ -6,7 +6,7 @@
  * preventing retrieval before approval.
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,7 +42,7 @@ async function setup() {
 // ---------------------------------------------------------------------------
 
 describe('Stage 1 — intent capture and restatement', () => {
-  let tmpDir: string;
+  let tmpDir = '';
   let store: ArtifactStore;
   let machine: StageMachine;
   let controller: Stage1Controller;
@@ -53,6 +53,21 @@ describe('Stage 1 — intent capture and restatement', () => {
     store = env.store;
     machine = env.machine;
     controller = env.controller;
+  });
+
+  // Deterministic teardown: remove the mkdtemp-created directory after
+  // every test — including when a test throws mid-run — so repeated local
+  // or CI runs do not accumulate stage1-test-* directories under tmpdir.
+  afterEach(async () => {
+    const toRemove = tmpDir;
+    tmpDir = '';
+    if (!toRemove) return;
+    try {
+      await rm(toRemove, { recursive: true, force: true });
+    } catch {
+      // Swallow cleanup errors: failing here would mask the real test
+      // failure. `force: true` already tolerates missing paths.
+    }
   });
 
   // -- Intent capture ---------------------------------------------------
