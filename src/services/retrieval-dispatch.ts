@@ -69,9 +69,11 @@ export async function retrievalDispatch(
     }
   }
 
-  // Assemble the retriever prompt from intent artifacts
+  // Assemble the retriever prompt from intent artifacts. The cleaned intent
+  // is used (not the raw verbatim input) so the retriever prompt isn't
+  // contaminated with large inline <file> blocks from the initial message.
   const assembled = assembleRetrieverPrompt({
-    userIntentVerbatim: capture.user_intent_verbatim,
+    userIntentVerbatim: capture.cleaned_user_intent,
     restatedIntent: restatement.restated_intent,
     retrievalFocus,
     taggedFiles: capture.tagged_files,

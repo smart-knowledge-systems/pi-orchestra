@@ -29,7 +29,7 @@ import type { ExpandedSpec, ExpansionInputV1 } from '../../src/artifacts/types.t
 // Test helpers
 // ---------------------------------------------------------------------------
 
-const echoRestate: RestateFunction = (intent) => `Restatement: ${intent}`;
+const echoRestate: RestateFunction = ({ cleanedIntent }) => `Restatement: ${cleanedIntent}`;
 
 /** Deterministic expand function that echoes back the intent as a spec. */
 const stubExpand: ExpandFunction = async (input: ExpansionInputV1): Promise<ExpandedSpec> => ({

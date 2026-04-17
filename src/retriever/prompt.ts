@@ -30,7 +30,11 @@ Rules:
 // ---------------------------------------------------------------------------
 
 export interface PromptAssemblyInput {
-  /** The user's verbatim intent text. */
+  /**
+   * The user's intent text. Callers should pass the cleaned intent (with
+   * inline <file> blocks stripped) so the retriever prompt is not diluted
+   * by large file bodies embedded in the original message.
+   */
   userIntentVerbatim: string;
   /** The approved restated intent. */
   restatedIntent: string;

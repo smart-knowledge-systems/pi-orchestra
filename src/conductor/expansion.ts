@@ -151,7 +151,10 @@ export class ExpansionController {
       artifact_id: id,
       intent_capture_id: capture.artifact_id,
       intent_restatement_id: restatement.artifact_id,
-      user_intent_verbatim: capture.user_intent_verbatim,
+      // Expansion consumes the cleaned intent (inline <file> blocks stripped)
+      // rather than the raw verbatim input to keep downstream prompts focused
+      // on the user's request instead of embedded file bodies.
+      user_intent_verbatim: capture.cleaned_user_intent,
       approved_restated_intent: restatement.restated_intent,
       included_files: includedFiles,
     };
