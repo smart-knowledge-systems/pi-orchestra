@@ -40,6 +40,7 @@ import { buildRestatementContext, toIntentFileRefs } from '../src/util/intent-fi
 import { evidenceAssemble } from '../src/services/evidence-assembler.ts';
 import { executionDispatch } from '../src/services/execution-dispatch.ts';
 import { retrievalDispatch } from '../src/services/retrieval-dispatch.ts';
+import type { AgentModelCallback } from '../src/retriever/agent-types.ts';
 import { synthesisDispatch, type SynthesisTaskType } from '../src/services/synthesis-dispatch.ts';
 
 type OrchestraRuntime = {
@@ -298,6 +299,14 @@ async function restateWithModel(input: RestateInput, ctx: ExtensionContext): Pro
     ? `${input.cleanedIntent}\n\n${input.contextBlock}`
     : input.cleanedIntent;
   return getModelText(`${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`, userText, ctx);
+}
+
+/**
+ * Model callback injected into the retriever agent loop. The callback lives
+ * at the extension edge so `src/retriever/**` never imports pi host APIs.
+ */
+function makeRetrieverAgentModel(ctx: ExtensionContext): AgentModelCallback {
+  return async ({ systemPrompt, userPrompt }) => getModelText(systemPrompt, userPrompt, ctx);
 }
 
 type ParsedExpandedSpec = {
@@ -606,6 +615,9 @@ async function runRetrievalStage(machine: StageMachine, ctx: ExtensionContext): 
     },
     runtime.store,
     runtime.config,
+    {
+      retrieverAgentModel: makeRetrieverAgentModel(ctx),
+    },
   );
   await logEvent('stage3.dispatch_result', result);
 

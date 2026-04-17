@@ -1,24 +1,31 @@
 /**
  * Retrieval dispatch service.
  *
- * Orchestrates the deterministic scout, the retriever worker, and the
- * normalizer to produce a stored `retrieval-index-v1` artifact from an
- * approved intent package.
+ * Orchestrates the deterministic scout, the retriever worker (with an
+ * optional bounded retriever agent), and the normalizer to produce a
+ * stored `retrieval-index-v1` artifact from an approved intent package.
  *
  * Ordering is explicit:
  *   1. Assemble the retriever prompt from cleaned intent + restatement.
  *   2. Run the deterministic scout — narrows the candidate set before any
  *      model-driven agent work.
  *   3. Run the retriever worker with the scout result (no re-scouting).
+ *      If a model callback is supplied, the worker drives the bounded
+ *      retriever agent loop; otherwise it falls back to scout-only output.
  *   4. Normalize and persist the structural retrieval artifact.
+ *
+ * The dispatch boundary is where pi-host details meet the retrieval
+ * pipeline: the model callback is injected here rather than imported
+ * inside `src/retriever/**`, so retrieval stays pi-agnostic.
  */
 
 import type { ArtifactStore } from '../artifacts/store.ts';
 import type { PiOrchestraConfig } from '../runtime/config.ts';
-import { runRetrieverWorker } from '../retriever/worker.ts';
+import { runRetrieverWorkerDetailed } from '../retriever/worker.ts';
 import { normalizeRetrievalOutput } from '../retriever/normalize.ts';
 import { assembleRetrieverPrompt } from '../retriever/prompt.ts';
 import { runScout } from '../retriever/scout.ts';
+import type { AgentLimits, AgentModelCallback } from '../retriever/agent-types.ts';
 
 // ---------------------------------------------------------------------------
 // Contract
@@ -28,6 +35,17 @@ export interface RetrievalDispatchInput {
   intent_capture_id: string;
   intent_restatement_id: string;
   intent_spec_id: string | null;
+}
+
+export interface RetrievalDispatchOptions {
+  /**
+   * Optional retriever-agent model callback. When supplied, the dispatch
+   * runs the bounded agent loop after the scout. When omitted, dispatch
+   * falls back to the deterministic scout-only output.
+   */
+  retrieverAgentModel?: AgentModelCallback;
+  /** Optional overrides for the retriever-agent bounded limits. */
+  retrieverAgentLimits?: Partial<AgentLimits>;
 }
 
 export interface RetrievalDispatchResult {
@@ -48,6 +66,7 @@ export async function retrievalDispatch(
   input: RetrievalDispatchInput,
   store: ArtifactStore,
   config: PiOrchestraConfig,
+  options: RetrievalDispatchOptions = {},
 ): Promise<RetrievalDispatchResult> {
   // Load the intent capture to get the query text
   const capture = await store.get('intent-capture-v1', input.intent_capture_id);
@@ -103,8 +122,10 @@ export async function retrievalDispatch(
   });
 
   // Run the retriever worker. Pass the pre-computed scout so the worker
-  // does not re-scan the repo.
-  const rawOutput = await runRetrieverWorker({
+  // does not re-scan the repo. When a retriever-agent model callback is
+  // supplied the worker drives the bounded agent loop inside the
+  // retrieval boundary.
+  const workerResult = await runRetrieverWorkerDetailed({
     repoRoot: config.repoRoot,
     query: assembled.query,
     cleanedIntent: capture.cleaned_user_intent,
@@ -112,11 +133,13 @@ export async function retrievalDispatch(
     retrievalFocus: assembled.retrievalFocus.length > 0 ? assembled.retrievalFocus : undefined,
     taggedFiles: assembled.taggedFiles.length > 0 ? assembled.taggedFiles : undefined,
     scout,
+    model: options.retrieverAgentModel,
+    agentLimits: options.retrieverAgentLimits,
   });
 
   // Normalize into retrieval-index-v1
   const result = normalizeRetrievalOutput({
-    raw: rawOutput,
+    raw: workerResult.raw,
     repoRoot: config.repoRoot,
     intentCaptureId: input.intent_capture_id,
     intentRestatementId: input.intent_restatement_id,
@@ -136,10 +159,13 @@ export async function retrievalDispatch(
 
   const selectedCount = result.artifact.files.filter((f) => f.selection_tier === 'selected').length;
   const reserveCount = result.artifact.files.filter((f) => f.selection_tier === 'reserve').length;
+  const agentNote = workerResult.agent
+    ? `, agent rounds=${workerResult.agent.telemetry.roundsExecuted}, stop=${workerResult.agent.telemetry.stopReason}`
+    : '';
 
   return {
     status: 'success',
     retrieval_index_id: result.artifact.artifact_id,
-    message: `Retrieval complete: ${selectedCount} selected, ${reserveCount} reserve, confidence=${result.artifact.confidence}`,
+    message: `Retrieval complete: ${selectedCount} selected, ${reserveCount} reserve, confidence=${result.artifact.confidence}${agentNote}`,
   };
 }

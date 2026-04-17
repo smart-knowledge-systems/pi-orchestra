@@ -1,20 +1,34 @@
 /**
  * Retriever worker — orchestrates retrieval from the deterministic scout
- * through (eventually) a bounded model-driven agent.
+ * through the bounded model-driven retriever agent (when a model callback
+ * is supplied).
  *
- * In Phase 3 the worker is a thin adapter that runs the scout and converts
- * its structural candidate set into the raw-output shape consumed by the
- * normalizer. In later phases an agent loop will sit between the scout and
- * this adapter to refine selection and author the default evidence scope.
+ * Sequence:
+ *   1. Run the scout (deterministic) to narrow the candidate set.
+ *   2. If a model callback is provided, hand the scout seed to the
+ *      retriever agent and let it read files / follow leads through the
+ *      deterministic executor.
+ *   3. Convert scout + agent output into the loose `RawRetrievalOutput`
+ *      shape the normalizer consumes.
  *
- * This boundary can still read raw source files through the scout. The
- * conductor must not import this module. Raw bodies never leave this file.
+ * This boundary can still read raw source files (through the scout and
+ * executor). The conductor must not import this module. Raw bodies never
+ * leave this file.
  */
 
-import { relative } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { RetrievalDefaultEvidenceMode, RetrievalSelectionTier } from '../artifacts/types.ts';
-import { runScout, type ScoutCandidate, type ScoutResult, type ScoutFileRole } from './scout.ts';
-import type { RawRetrievalOutput, RawRetrievalFile, RawRetrievalSymbol } from './normalize.ts';
+import type {
+  AgentFileSelection,
+  AgentFinalRecommendation,
+  AgentLimits,
+  AgentModelCallback,
+  AgentRunResult,
+  AgentSymbolSelection,
+} from './agent-types.ts';
+import { runRetrieverAgent } from './agent.ts';
+import { runScout, type ScoutCandidate, type ScoutFileRole, type ScoutResult } from './scout.ts';
+import type { RawRetrievalFile, RawRetrievalOutput, RawRetrievalSymbol } from './normalize.ts';
 
 // ---------------------------------------------------------------------------
 // Worker input
@@ -37,6 +51,21 @@ export interface RetrieverWorkerInput {
    * than running the scout again — keeping dispatch in control of ordering.
    */
   scout?: ScoutResult;
+  /**
+   * Optional model callback. When supplied the worker runs the bounded
+   * retriever agent after the scout. When omitted the worker falls back to
+   * the deterministic scout-only output (useful in tests and pipelines
+   * that do not yet wire a model).
+   */
+  model?: AgentModelCallback;
+  /** Optional overrides for the agent's bounded limits. */
+  agentLimits?: Partial<AgentLimits>;
+}
+
+export interface RetrieverWorkerResult {
+  raw: RawRetrievalOutput;
+  scout: ScoutResult;
+  agent: AgentRunResult | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,17 +211,172 @@ export function scoutToRawOutput(query: string, scout: ScoutResult): RawRetrieva
 }
 
 // ---------------------------------------------------------------------------
+// Agent → raw output adapter
+// ---------------------------------------------------------------------------
+
+function normalizeRelPath(repoRoot: string, path: string): string {
+  const absolute = isAbsolute(path) ? resolve(path) : resolve(repoRoot, path);
+  const rel = relative(repoRoot, absolute);
+  return rel === '' ? '.' : rel;
+}
+
+function buildScoutLookup(scout: ScoutResult): Map<string, ScoutCandidate> {
+  const lookup = new Map<string, ScoutCandidate>();
+  for (const c of [...scout.selected, ...scout.reserve]) {
+    lookup.set(c.relPath, c);
+  }
+  return lookup;
+}
+
+function fileModeFromAgentFile(file: AgentFileSelection): { fileMode: string; reason: string } {
+  if (file.include_entire_file) {
+    return {
+      fileMode: 'file',
+      reason: file.selection_reason || 'retriever agent selected whole-file context',
+    };
+  }
+  if (file.default_evidence_mode === 'spans' || file.symbols.some((s) => s.selected_by_default)) {
+    return {
+      fileMode: 'span',
+      reason: file.selection_reason || 'retriever agent selected symbol spans',
+    };
+  }
+  return roleToRecommendation(file.default_evidence_mode);
+}
+
+function agentSymbolToRaw(
+  agentSym: AgentSymbolSelection,
+  baseSymbol: RawRetrievalSymbol | undefined,
+): RawRetrievalSymbol {
+  if (baseSymbol) {
+    return {
+      ...baseSymbol,
+      start: Math.max(1, agentSym.start),
+      count: Math.max(1, agentSym.count),
+      recommended_expansion: agentSym.selected_by_default
+        ? 'span'
+        : baseSymbol.recommended_expansion,
+      expansion_reason: agentSym.selection_reason || baseSymbol.expansion_reason,
+    };
+  }
+  return {
+    kind: 'symbol',
+    name: agentSym.name,
+    start: Math.max(1, agentSym.start),
+    count: Math.max(1, agentSym.count),
+    summary: agentSym.selection_reason,
+    role_in_system: 'retriever-agent-selected symbol',
+    depends_on: [],
+    used_by: [],
+    relevance: agentSym.selected_by_default ? 'high' : 'medium',
+    change_likelihood: 'unknown',
+    expansion_priority: agentSym.selected_by_default ? 'high' : 'medium',
+    recommended_expansion: agentSym.selected_by_default ? 'span' : 'none',
+    expansion_reason: agentSym.selection_reason,
+  };
+}
+
+function agentFileToRawFile(
+  file: AgentFileSelection,
+  scoutLookup: Map<string, ScoutCandidate>,
+  repoRoot: string,
+): RawRetrievalFile {
+  const relPath = normalizeRelPath(repoRoot, file.path);
+  const scout = scoutLookup.get(relPath);
+  const { fileMode, reason } = fileModeFromAgentFile(file);
+
+  const baseSymbols = scout
+    ? scout.topSymbols.map((s) => symbolToRaw(s, scout.imports, scout.role))
+    : [];
+  const baseByName = new Map<string, RawRetrievalSymbol>();
+  for (const sym of baseSymbols) baseByName.set(sym.name, sym);
+
+  const agentSymbols = file.symbols.map((sym) => agentSymbolToRaw(sym, baseByName.get(sym.name)));
+
+  // Any scout symbols the agent did not mention remain available as context
+  // at the structural level but are not marked as selected.
+  const includedNames = new Set(agentSymbols.map((s) => s.name));
+  const leftoverSymbols = baseSymbols.filter((s) => !includedNames.has(s.name));
+
+  const absolute = isAbsolute(file.path) ? resolve(file.path) : resolve(repoRoot, file.path);
+  const whyRelevant =
+    file.tier === 'reserve'
+      ? `reserve candidate (agent): ${file.selection_reason || 'agent marked for optional promotion'}`
+      : file.selection_reason ||
+        (scout ? scout.rationale : 'retriever agent selected for evidence package');
+
+  return {
+    path: absolute,
+    why_relevant: whyRelevant,
+    file_summary: scout ? scout.summary : `${relPath} — retriever-agent selection`,
+    ast_skeleton: scout ? scout.astSkeleton : [],
+    recommended_expansion: fileMode,
+    expansion_reason: reason,
+    selection_tier: file.tier,
+    selection_reason:
+      file.selection_reason ||
+      (scout ? `${scout.role} · ${scout.rationale}` : 'retriever agent selection'),
+    default_evidence_mode: file.default_evidence_mode,
+    symbols: [...agentSymbols, ...leftoverSymbols],
+  };
+}
+
+function confidenceFromAgent(recommendation: AgentFinalRecommendation, scout: ScoutResult): string {
+  if (recommendation.files.length === 0) return confidenceFromScout(scout);
+  return recommendation.confidence;
+}
+
+function agentToRawOutput(
+  query: string,
+  scout: ScoutResult,
+  agentResult: AgentRunResult,
+  repoRoot: string,
+): RawRetrievalOutput {
+  const lookup = buildScoutLookup(scout);
+  const files = agentResult.recommendation.files.map((file) =>
+    agentFileToRawFile(file, lookup, repoRoot),
+  );
+
+  return {
+    query,
+    confidence: confidenceFromAgent(agentResult.recommendation, scout),
+    files,
+    cross_file_findings:
+      agentResult.recommendation.cross_file_findings.length > 0
+        ? agentResult.recommendation.cross_file_findings
+        : scout.crossFileHints,
+    gaps: agentResult.recommendation.gaps.length > 0 ? agentResult.recommendation.gaps : scout.gaps,
+    followup_queries: agentResult.recommendation.followup_queries,
+    strategy_summary: agentResult.recommendation.strategy_summary || scout.strategySummary,
+    scout_terms: scout.scoutTerms,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
 /**
  * Run the retriever worker against the repository.
  *
- * Currently: run the scout (or reuse a pre-computed one) and adapt its
- * output to the normalization contract. Future phases will interpose a
- * bounded retriever agent between the scout and the adapter.
+ * When `input.model` is supplied, the worker runs the bounded retriever
+ * agent after the scout and adapts the agent's final recommendation to
+ * the normalization contract. When no model is supplied the worker falls
+ * back to the deterministic scout-only adapter.
  */
 export async function runRetrieverWorker(input: RetrieverWorkerInput): Promise<RawRetrievalOutput> {
+  const result = await runRetrieverWorkerDetailed(input);
+  return result.raw;
+}
+
+/**
+ * Detailed variant that returns the raw output alongside the scout and
+ * (when available) agent results. Used by dispatch and by tests that need
+ * to inspect agent trace / telemetry.
+ */
+export async function runRetrieverWorkerDetailed(
+  input: RetrieverWorkerInput,
+): Promise<RetrieverWorkerResult> {
   const scout =
     input.scout ??
     (await runScout({
@@ -203,7 +387,29 @@ export async function runRetrieverWorker(input: RetrieverWorkerInput): Promise<R
       taggedFiles: input.taggedFiles,
     }));
 
-  return scoutToRawOutput(input.query, scout);
+  if (!input.model) {
+    return { raw: scoutToRawOutput(input.query, scout), scout, agent: null };
+  }
+
+  const agent = await runRetrieverAgent({
+    repoRoot: input.repoRoot,
+    intent: {
+      cleanedIntent: input.cleanedIntent,
+      restatedIntent: input.restatedIntent,
+      retrievalFocus: input.retrievalFocus,
+      taggedFiles: input.taggedFiles,
+    },
+    scout,
+    model: input.model,
+    limits: input.agentLimits,
+  });
+
+  const raw =
+    agent.recommendation.files.length === 0
+      ? scoutToRawOutput(input.query, scout)
+      : agentToRawOutput(input.query, scout, agent, resolve(input.repoRoot));
+
+  return { raw, scout, agent };
 }
 
 // Re-export for tests and diagnostics.
