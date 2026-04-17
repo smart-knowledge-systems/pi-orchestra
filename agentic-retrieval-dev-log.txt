@@ -67,3 +67,35 @@ All three Sprint 2 tasks are complete.
 **Verification**: `tsc --noEmit` clean. `bun test` 378 pass / 2 fail — both failures are the pre-existing `tests/retriever/prompt.test.ts` "Tagged files:" mismatch noted in the prior dev log, unrelated to this work.
 
 **Files modified**: `src/util/intent-files.ts`, `src/conductor/stage-1.ts`, `src/conductor/expansion.ts`, `src/services/retrieval-dispatch.ts`, `src/retriever/prompt.ts`, `extensions/conductor-extension.ts`, `tests/interaction/stage-1.test.ts`, `tests/interaction/expansion-protocol.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`. Nothing unfinished within the active-task scope.
+
+===== 2026-04-17 | opus implement AR-P3 =====
+All three Sprint 3 tasks complete.
+
+**AR-P3-T1 — scout module + curated terms**: New `src/retriever/scout.ts` exports `buildScoutTerms` and `runScout`. Terms are deterministic, weighted by provenance (focus=4, tag=3, restatement=2, intent=1), deduped with origin aggregation, stop-word filtered, and capped at MAX_TERMS=24. Tokenization is shared by splitting camelCase + `[._/-]` separators. The scout is the only file-reading retrieval path in Phase 3 and is separated from the later agent loop.
+
+**AR-P3-T2 — ranked candidates, tiers, role hints**: `runScout` discovers files deterministically (sorted walk), scores each with weighted term/symbol/path matching, and splits results into `selected` (<=8) and `reserve` (<=4) tiers. Each `ScoutCandidate` carries: stable rationale string, `ScoutFileRole` (`tagged` | `entry-point` | `config` | `doc` | `test` | `implementation` | `unknown`), `RetrievalDefaultEvidenceMode` hint (short tagged files → whole_file; strong symbol score → spans; docs/config → summary; otherwise summary/summary+ast), top symbol hints, imports, AST skeleton, and lineCount. Tagged files get a +50 boost and always win ranking ties.
+
+**AR-P3-T3 — dispatch wiring + deterministic tests**: `src/services/retrieval-dispatch.ts` now runs `runScout` explicitly before the retriever worker and the prompt assembler (the scout result is injected into both so no re-scanning happens). `src/retriever/worker.ts` reduced to orchestration: `runRetrieverWorker` either uses an injected scout or runs one, then `scoutToRawOutput` converts candidates into `RawRetrievalOutput` with per-file `selection_tier`, `selection_reason`, `default_evidence_mode`, plus top-level `strategy_summary` and `scout_terms`. `src/retriever/normalize.ts` propagates those new raw fields (with validated coercion to the v1 union types) into the stored `retrieval-index-v1` artifact. `src/retriever/prompt.ts` now shares term generation with the scout via `buildScoutTerms` and accepts a `scoutTerms` pass-through.
+
+**Tests added/updated**:
+- `tests/retriever/scout.test.ts` (new, 14 tests): weight ordering by origin, origin aggregation, stop-word exclusion, determinism, narrow bounded output, tagged-file role+boost, retrieval-focus steering, rationale/evidence-mode population, selected/reserve exclusivity, no-raw-body leak, strategy summary shape, cross-file hints, and a "narrower than the old 12-file heuristic default" guard on a 20-file repo.
+- `tests/retriever/retrieval-index.test.ts`: dispatch now asserts that `strategy_summary` and `scout_terms` propagate into the stored artifact, that every file has a valid tier/mode, that the selected set is <=8 and <12, and that a tagged file is promoted into the selected tier with a "tagged" selection_reason.
+
+**Side effect**: `src/retriever/prompt.ts`'s "User-tagged files:" label is now "Tagged files:", matching the test expectations from `tests/retriever/prompt.test.ts`. The two pre-existing failures noted in earlier dev logs are now resolved.
+
+**Files modified**: `src/retriever/scout.ts` (new), `src/retriever/worker.ts`, `src/retriever/normalize.ts`, `src/retriever/prompt.ts`, `src/services/retrieval-dispatch.ts`, `tests/retriever/scout.test.ts` (new), `tests/retriever/retrieval-index.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 395 pass / 0 fail (up from 378 pass / 2 fail). Nothing unfinished within the AR-P3-T1/T2/T3 scope.
+
+===== 2026-04-17T21:29:16Z | opus implement =====
+All three Sprint 3 tasks complete. Summary:
+
+**AR-P3-T1** — New `src/retriever/scout.ts` with deterministic `buildScoutTerms` (weighted by provenance: focus=4, tag=3, restatement=2, intent=1, stop-word filtered, capped at 24) and `runScout` that sorts filesystem walks for determinism.
+
+**AR-P3-T2** — Scout emits `selected` (≤8) and `reserve` (≤4) tiers, each with stable rationale, `ScoutFileRole`, `RetrievalDefaultEvidenceMode` hint, top symbol hints, and AST skeleton. Tagged files get a +50 boost into `selected`.
+
+**AR-P3-T3** — `retrieval-dispatch.ts` now runs `runScout` before the worker, passes the scout result into both the prompt and worker, and the new scout-authored fields (`strategy_summary`, `scout_terms`, per-file `selection_tier`/`selection_reason`/`default_evidence_mode`) flow through `worker.ts`'s `scoutToRawOutput` and `normalize.ts` into the stored artifact. Added `tests/retriever/scout.test.ts` (14 tests) and extended `tests/retriever/retrieval-index.test.ts`.
+
+**Files modified**: `src/retriever/scout.ts` (new), `src/retriever/worker.ts`, `src/retriever/normalize.ts`, `src/retriever/prompt.ts`, `src/services/retrieval-dispatch.ts`, `tests/retriever/scout.test.ts` (new), `tests/retriever/retrieval-index.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 395 pass / 0 fail (up from 378 pass / 2 fail — fixing the "User-tagged files:" mismatch was a side benefit). Nothing unfinished within Phase 3 scope.

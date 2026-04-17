@@ -110,7 +110,7 @@
       "deliverable": "Dedicated scout pass with deterministic curated term generation",
       "files": ["src/retriever/scout.ts", "src/retriever/prompt.ts", "src/retriever/worker.ts"],
       "dependencies": ["AR-P2-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Scout term generation is deterministic and no longer a naive split-all-words strategy",
         "Tagged files and retrieval focus materially influence scout term selection",
@@ -127,7 +127,7 @@
       "deliverable": "Deterministic scout output with selected and reserve candidates plus rationale",
       "files": ["src/retriever/scout.ts", "src/retriever/worker.ts"],
       "dependencies": ["AR-P3-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Scout output distinguishes selected and reserve candidates",
         "Each selected candidate includes a stable rationale and role hint",
@@ -148,7 +148,7 @@
         "tests/retriever/retrieval-index.test.ts"
       ],
       "dependencies": ["AR-P3-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Retrieval dispatch runs the scout before any model-driven retrieval work",
         "Scout tests prove deterministic candidate selection and tagged-file boosting",
