@@ -99,3 +99,59 @@ All three Sprint 3 tasks complete. Summary:
 **Files modified**: `src/retriever/scout.ts` (new), `src/retriever/worker.ts`, `src/retriever/normalize.ts`, `src/retriever/prompt.ts`, `src/services/retrieval-dispatch.ts`, `tests/retriever/scout.test.ts` (new), `tests/retriever/retrieval-index.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
 
 **Verification**: `bunx tsc --noEmit` clean. `bun test` 395 pass / 0 fail (up from 378 pass / 2 fail — fixing the "User-tagged files:" mismatch was a side benefit). Nothing unfinished within Phase 3 scope.
+
+===== 2026-04-17 | opus implement AR-P4 =====
+All three active Sprint 4 tasks complete (T1, T2, T3). Sprint 4 introduces a bounded, model-driven retriever agent behind the scout.
+
+**AR-P4-T1 — protocol + prompts**: New `src/retriever/agent-types.ts` defines the typed round contract:
+- `RetrievalAction` discriminated union: `read_file` (window or full), `search_content` (case-insensitive literal), `search_paths` (substring), `follow_imports` (relative specifier resolution).
+- `RetrievalObservation` mirror union with success/truncated/error outcomes.
+- `AgentRoundOutput` = `{ status: 'continue'; actions[] }` | `{ status: 'stop'; recommendation }`.
+- `AgentFinalRecommendation` shape matches `RawRetrievalOutput` selection fields (path, tier, default_evidence_mode, selection_reason, symbol selections).
+- `AgentLimits` with defaults: `maxRounds=3`, `maxActionsPerRound=4`, `maxFileReads=12`, `maxLinesPerRead=200`, `maxBytesPerRead=16*1024`, `maxObservationBudgetBytes=256*1024`.
+- `AgentModelCallback` signature `({ systemPrompt, userPrompt, round }) => Promise<string>` — pi-host-agnostic.
+
+New `src/retriever/agent-prompt.ts` exports `RETRIEVER_AGENT_SYSTEM_PROMPT` (constrains to single JSON object, enumerates action schemas, recommendation schema, bounded-behavior rules), plus `buildInitialRoundPrompt` and `buildSubsequentRoundPrompt(forceStop?)` that render scout seed + prior observations.
+
+**AR-P4-T2 — deterministic executor**: New `src/retriever/executor.ts`:
+- `createExecutorState(repoRoot, limits)` holds lazy repo index (sorted source files), read counter, observation-byte budget.
+- `resolveInsideRepo` rejects any path that escapes `repoRoot` (absolute or `..` tricks).
+- `executeReadFile` respects `start_line`/`end_line` window, caps lines at `maxLinesPerRead`, truncates at `maxBytesPerRead`, and charges `maxFileReads`.
+- `executeSearchContent` case-insensitive literal with ≤4 hits/file and ≤25 total hits (from `maxContentSearchHits`).
+- `executeSearchPaths` substring match against the lazy repo index (cap 25 matches).
+- `executeFollowImports` resolves relative specifiers with `.ts`/`.tsx`/`.js`/`.mjs`/`.cjs` + `/index.*` candidates, marks unresolved ones.
+- `executeActions(state, actions)` runs actions sequentially, produces a `RoundObservationList`, and short-circuits when the observation-byte budget would be exceeded.
+
+**AR-P4-T3 — bounded loop + injection**: New `src/retriever/agent.ts`:
+- `runRetrieverAgent({ repoRoot, intent, scout, model, limits })` drives the round loop.
+- Per round: assemble prompt → `callModelSafely` → `parseRoundOutput` (strips code fences, extracts first `{…}` block) → if `stop` persist recommendation & break; else execute actions, record trace, continue.
+- Final round forces `forceStop=true`. On parse/model error, falls through to `fallbackRecommendation` synthesized from the scout seed.
+- `sanitizeRecommendation` normalizes all file paths to repo-relative and drops any that escape `repoRoot`.
+- Telemetry: `roundsExecuted`, `actionsExecuted`, `fileReadsExecuted`, `observationBytes`, `stopReason` (`agent_stopped` | `round_cap` | `action_cap` | `model_error` | `parse_error`).
+
+`src/retriever/worker.ts` rewritten for orchestration:
+- `RetrieverWorkerInput` gains optional `model?: AgentModelCallback` and `agentLimits?: Partial<AgentLimits>`.
+- New `runRetrieverWorkerDetailed(input) → { raw, scout, agent }`. Without a model → scout-only passthrough. With a model → `runRetrieverAgent`; agent selections overlay onto scout structural data (AST skeleton, imports, symbol metadata retained; tier/mode/reason/symbols overridden by agent). Empty agent recommendation falls back to scout output.
+- Legacy `runRetrieverWorker` preserved as a `runRetrieverWorkerDetailed` wrapper for backward compatibility.
+
+`src/services/retrieval-dispatch.ts` adds `RetrievalDispatchOptions` with `retrieverAgentModel` and `retrieverAgentLimits`, calls `runRetrieverWorkerDetailed`, and appends agent rounds + stopReason to the success message.
+
+`extensions/conductor-extension.ts` adds `makeRetrieverAgentModel(ctx)` that adapts `getModelText(systemPrompt, userPrompt, ctx)` into an `AgentModelCallback`, wired into `runRetrievalStage` via `{ retrieverAgentModel: makeRetrieverAgentModel(ctx) }`. Boundary isolation verified: grep for `pi-ai|pi-coding-agent` in `src/` finds nothing.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 395 pass / 0 fail (existing coverage continues to pass because the worker falls back to scout-only when no model is injected; dedicated agent-loop tests are the AR-P4-T4 scope and out of active-task scope here).
+
+**Files modified**: `src/retriever/agent-types.ts` (new), `src/retriever/agent-prompt.ts` (new), `src/retriever/executor.ts` (new), `src/retriever/agent.ts` (new), `src/retriever/worker.ts` (rewritten for agent integration), `src/services/retrieval-dispatch.ts` (options + agent telemetry), `extensions/conductor-extension.ts` (model callback factory + wiring), `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`. Nothing unfinished within the AR-P4-T1/T2/T3 scope — AR-P4-T4 (agent tests) and AR-P4-T5 remain `planned` as expected.
+
+===== 2026-04-17T21:42:57Z | opus implement =====
+Sprint 4 active tasks (AR-P4-T1, T2, T3) are complete.
+
+**What changed**
+- **AR-P4-T1** — New `src/retriever/agent-types.ts` (round contracts, `AgentLimits` defaults: 3 rounds / 4 actions / 12 reads / 200 lines / 16KB / 256KB budget, `AgentModelCallback` signature) and `src/retriever/agent-prompt.ts` (system prompt + initial/subsequent round builders with `forceStop`).
+- **AR-P4-T2** — New `src/retriever/executor.ts` with `resolveInsideRepo` path safety, bounded `read_file` / `search_content` / `search_paths` / `follow_imports` executors, lazy repo index, and observation-byte budget enforcement.
+- **AR-P4-T3** — New `src/retriever/agent.ts` drives the bounded round loop with robust JSON parsing, scout-seeded fallback on model/parse error, path sanitization, and telemetry (`stopReason`). `src/retriever/worker.ts` rewritten to overlay agent selections onto scout structural data; `src/services/retrieval-dispatch.ts` takes a `retrieverAgentModel` option; `extensions/conductor-extension.ts` injects `makeRetrieverAgentModel(ctx)` at the extension edge. `src/` has no pi-host imports.
+
+**Files modified**: `src/retriever/agent-types.ts` (new), `src/retriever/agent-prompt.ts` (new), `src/retriever/executor.ts` (new), `src/retriever/agent.ts` (new), `src/retriever/worker.ts`, `src/services/retrieval-dispatch.ts`, `extensions/conductor-extension.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Verification**: `bunx tsc --noEmit` clean; `bun test` 395 pass / 0 fail.
+
+**Not done (by design)**: AR-P4-T4 (agent-loop tests) and AR-P4-T5 remain `planned` — out of active-task scope.

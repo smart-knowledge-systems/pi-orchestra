@@ -169,7 +169,7 @@
         "src/retriever/agent.ts"
       ],
       "dependencies": ["AR-P3-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Retriever-agent round contracts are fully typed",
         "Prompts constrain the agent to structured JSON actions and bounded behavior",
@@ -186,7 +186,7 @@
       "deliverable": "Bounded retrieval action executor for the model-driven retriever agent",
       "files": ["src/retriever/executor.ts", "src/retriever/worker.ts"],
       "dependencies": ["AR-P4-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Supported action types are executed deterministically within repo bounds",
         "File observations are bounded by explicit line/byte limits",
@@ -208,7 +208,7 @@
         "extensions/conductor-extension.ts"
       ],
       "dependencies": ["AR-P4-T1", "AR-P4-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Retriever-agent rounds terminate under explicit round and action caps",
         "The agent can read files, follow leads, and emit final recommended_evidence selections",
