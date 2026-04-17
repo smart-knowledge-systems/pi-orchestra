@@ -10,6 +10,7 @@
 
 import { access, readFile } from 'node:fs/promises';
 import { relative, resolve, isAbsolute } from 'node:path';
+import type { IntentFileRef, IntentFileRefSource } from '../artifacts/types.ts';
 
 const FILE_BLOCK_RE = /<file name="([^"]+)">([\s\S]*?)<\/file>/g;
 const MAX_FILE_CHARS = 4000;
@@ -72,6 +73,12 @@ export interface RestatementContextResult {
   taggedFiles: string[];
   files: RestatementContextFile[];
   contextBlock: string;
+}
+
+export function toIntentFileRefs(
+  files: ReadonlyArray<{ path: string; source: IntentFileRefSource }>,
+): IntentFileRef[] {
+  return files.map((file) => ({ path: file.path, source: file.source }));
 }
 
 function trimToBudget(
