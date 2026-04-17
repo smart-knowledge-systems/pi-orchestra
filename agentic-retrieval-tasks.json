@@ -263,7 +263,7 @@
         "extensions/conductor-extension.ts"
       ],
       "dependencies": ["AR-P5-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "artifact_inspect surfaces selected/reserve files, default evidence modes, and strategy metadata",
         "Conductor retrieval summaries explain the narrowed default scope without leaking raw code",
@@ -284,7 +284,7 @@
         "tests/fixtures/sample-artifacts/retrieval-index-v1.json"
       ],
       "dependencies": ["AR-P5-T1", "AR-P5-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Retrieval fixtures reflect the new recommendation-rich structural shape",
         "Normalization tests assert no raw file content leakage",
@@ -301,7 +301,7 @@
       "deliverable": "Recommended evidence-plan authoring helper driven by retrieval artifact recommendations",
       "files": ["src/conductor/evidence-plan.ts"],
       "dependencies": ["AR-P5-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "The default plan can be derived exactly from retrieval recommended_evidence fields",
         "Selected symbols and neighbor-line defaults are preserved without conductor guesswork",

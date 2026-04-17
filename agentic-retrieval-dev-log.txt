@@ -201,3 +201,46 @@ Both active tasks complete.
 **AR-P5-T1** — `src/retriever/normalize.ts` now builds `recommended_evidence` from normalized file ids, filtering to selected-tier non-exclude files and emitting per-symbol spans for `selected_by_default` symbols. Raw worker/agent outputs propagate the new include flags through `src/retriever/worker.ts`. Path/line enforcement and `raw_content` stripping preserved.
 
 Verification: `bunx tsc --noEmit` clean; `bun test` 411 pass / 0 fail (up from 395). Task statuses flipped to `completed` in `agentic-retrieval-tasks.json` and a dated entry appended to `agentic-retrieval-dev-log.txt`. AR-P4-T5 and AR-P5-T2/T3 left as `planned` per scope.
+
+===== 2026-04-17T22:25Z | opus implement AR-P5-T2 + AR-P5-T3 + AR-P6-T1 =====
+All three active tasks complete.
+
+**AR-P5-T2 — artifact inspection + conductor summaries**
+- `src/services/artifact-inspect.ts`: `RetrievalIndexInspection` expanded with `strategy_summary`, `scout_terms`, `selected_file_count`, `reserve_file_count`, per-file `selection_tier`/`selection_reason`/`default_evidence_mode`, per-symbol `selected_by_default`/`default_neighbor_lines`/`selection_reason`, and the full `recommended_evidence` block. `inspectRetrievalIndex` populates tier counts and forwards the retriever-authored recommendation structurally. `BLOCKED_TYPES` still rejects `evidence-bundle-v1` inspection.
+- `src/conductor/retrieval.ts`: unchanged API — `inspectRetrievalResult` now returns the richer payload automatically via the updated inspection type.
+- `extensions/conductor-extension.ts`: `summarizeInspection` restructured around the new narrowed scope. It now shows strategy summary, scout terms, selected-file count vs reserve-file count, per-selected default_evidence_mode + selection_reason, a separate "Reserve candidates" list, and a dedicated "Recommended default evidence scope" block (files-in-default-plan, selected symbol spans, and the three include flags).
+
+**AR-P5-T3 — fixtures + validation tests**
+- `tests/fixtures/sample-artifacts/retrieval-index-v1.json`: enriched — more substantive `strategy_summary`, richer `scout_terms`, and a second symbol on the selected file with `selected_by_default=false` to exercise the "selected-file-but-not-default-span" case. Reserve-tier example preserved and symbol ids deduplicated (s1/s2/s3).
+- `tests/retriever/normalize.test.ts` "no raw file content" golden test now also feeds `strategy_summary`, `scout_terms`, selection tiers, default evidence modes, and a per-symbol `selected_by_default`. Assertions extended to cover: new top-level strategy/scout fields, per-file tier + mode round-trip, `recommended_evidence` filters reserve-tier out, `include_span`/`neighbor_lines` propagation (2 in this test), and `include_cross_file_findings`/`include_gaps`/`include_followup_queries` defaulting rules.
+- `tests/conductor/retrieval-stage.test.ts`: added "surfaces strategy metadata, tiers, default modes, and recommended scope" test that builds a selected+reserve fixture, confirms selected/reserve counts, per-file tier and default mode, per-symbol `selected_by_default`/`default_neighbor_lines`, `recommended_evidence` content (selected only, correct neighbor_lines), and no `raw_content` leakage in the serialized inspection payload.
+
+**AR-P6-T1 — createRecommendedEvidencePlan helper**
+- `src/conductor/evidence-plan.ts`: added `createRecommendedEvidencePlan(retrieval_index, options?)` with `CreateRecommendedEvidencePlanOptions` (`promote_reserve`, `assembly_options`, `prompt_sections`, `target_task`). The helper copies `recommended_evidence.files` into `selection.files` byte-for-byte (include flags + spans + neighbor_lines preserved), validates that every `file_id`/`symbol_id` exists in the artifact, and carries `include_cross_file_findings`/`include_gaps`/`include_followup_queries` straight through. Reserve-tier files are excluded by default; `promote_reserve` takes reserve `file_id`s and adds summary-only plan entries (it refuses ids that aren't reserve-tier and ids not present in the artifact). Defaults for assembly/prompt/target match `createEvidencePlan`.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 412 pass / 0 fail (up from 411 — net +1 new conductor retrieval-stage test).
+
+**Files modified**: `src/services/artifact-inspect.ts`, `src/conductor/evidence-plan.ts`, `extensions/conductor-extension.ts`, `tests/fixtures/sample-artifacts/retrieval-index-v1.json`, `tests/retriever/normalize.test.ts`, `tests/conductor/retrieval-stage.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P6-T2/T3 and AR-P7-* remain `planned` — integrating the new default plan helper into the extension evidence stage (AR-P6-T2) and replacing the naive `createDefaultEvidencePlan` there is next-sprint scope. The conductor extension still uses `createEvidencePlan` with its summary+first-two-spans heuristic until AR-P6-T2.
+
+===== 2026-04-17T22:02:02Z | opus implement =====
+All three active tasks are complete. Verified with `bunx tsc --noEmit` (clean) and `bun test` (412 pass / 0 fail, up from 411).
+
+## Summary
+
+**AR-P5-T2 — inspection + conductor summaries**
+- `src/services/artifact-inspect.ts`: `RetrievalIndexInspection` now exposes `strategy_summary`, `scout_terms`, `selected_file_count`, `reserve_file_count`, per-file `selection_tier`/`selection_reason`/`default_evidence_mode`, per-symbol `selected_by_default`/`default_neighbor_lines`/`selection_reason`, and the full `recommended_evidence` block. Evidence-bundle inspection stays blocked.
+- `extensions/conductor-extension.ts`: `summarizeInspection` rewrites the Stage 3 notification around strategy summary, scout terms, a dedicated "Selected files" list (with default_evidence_mode + selection_reason), a "Reserve candidates" list, and a "Recommended default evidence scope" block (plan file count, selected symbol spans, the three include flags).
+
+**AR-P6-T1 — createRecommendedEvidencePlan helper**
+- `src/conductor/evidence-plan.ts`: added `createRecommendedEvidencePlan(retrieval_index, options?)` that copies `recommended_evidence.files` into `selection.files` exactly (include flags, spans, neighbor_lines), validates every `file_id`/`symbol_id` against the artifact, carries `include_cross_file_findings`/`include_gaps`/`include_followup_queries` through unchanged, and excludes reserve-tier files unless passed via `promote_reserve`. Naive `createEvidencePlan` is left in place for callers that still need explicit controls.
+
+**AR-P5-T3 — fixtures + tests**
+- `tests/fixtures/sample-artifacts/retrieval-index-v1.json`: enriched strategy summary + scout terms; selected file now has a second symbol with `selected_by_default=false` to exercise the non-default-span case.
+- `tests/retriever/normalize.test.ts`: the "no raw file content" golden now also feeds strategy/scout/tiers/modes/per-symbol default-span data and asserts no leakage plus correct recommended_evidence filtering (reserve excluded, neighbor_lines respected, include-flag defaults).
+- `tests/conductor/retrieval-stage.test.ts`: new "surfaces strategy metadata, tiers, default modes, and recommended scope" test covers the expanded inspection payload end-to-end and confirms `raw_content` still never appears.
+
+**Files modified**: `src/services/artifact-inspect.ts`, `src/conductor/evidence-plan.ts`, `extensions/conductor-extension.ts`, `tests/fixtures/sample-artifacts/retrieval-index-v1.json`, `tests/retriever/normalize.test.ts`, `tests/conductor/retrieval-stage.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P6-T2 (wiring the new helper into the extension evidence stage), AR-P6-T3, and AR-P7-* remain `planned`. The extension still uses the legacy `createDefaultEvidencePlan` / `createEvidencePlan` summary+first-two-spans heuristic until AR-P6-T2.
