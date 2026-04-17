@@ -79,6 +79,70 @@ describe('Stage 1 — intent capture and restatement', () => {
       expect(capture.tagged_files).toEqual(['src/auth.ts', 'src/login.ts']);
     });
 
+    it('persists cleaned intent and intent_file_refs from capture options', async () => {
+      const cleaned = 'Refactor auth\n[Included file: src/auth.ts]';
+      const capture = await controller.captureIntent(
+        'Refactor auth\n<file name="src/auth.ts">export const a = 1;</file>',
+        ['src/auth.ts'],
+        {
+          cleanedIntent: cleaned,
+          intentFileRefs: [{ path: 'src/auth.ts', source: 'inline' }],
+          restatementContext: 'Included files for context:\n- src/auth.ts (inline)',
+        },
+      );
+
+      expect(capture.user_intent_verbatim).toContain('<file name="src/auth.ts">');
+      expect(capture.cleaned_user_intent).toBe(cleaned);
+      expect(capture.cleaned_user_intent).not.toContain('<file name="src/auth.ts">');
+      expect(capture.intent_file_refs).toEqual([{ path: 'src/auth.ts', source: 'inline' }]);
+      expect(capture.tagged_files).toEqual(['src/auth.ts']);
+    });
+
+    it('defaults cleaned_user_intent to the verbatim text when no options are given', async () => {
+      const capture = await controller.captureIntent('Simple request');
+      expect(capture.cleaned_user_intent).toBe('Simple request');
+      expect(capture.intent_file_refs).toBeUndefined();
+    });
+
+    it('forwards cleaned intent and context block to the restate callback', async () => {
+      const seen: Array<{ cleanedIntent: string; contextBlock?: string }> = [];
+      const spyRestate: RestateFunction = (input) => {
+        seen.push({ cleanedIntent: input.cleanedIntent, contextBlock: input.contextBlock });
+        return `Restatement: ${input.cleanedIntent}`;
+      };
+      const spyController = new Stage1Controller(store, machine, spyRestate);
+      await spyController.captureIntent('Verbatim', ['src/a.ts'], {
+        cleanedIntent: 'Cleaned intent',
+        intentFileRefs: [{ path: 'src/a.ts', source: 'inline' }],
+        restatementContext: 'Included files for context:\n- src/a.ts (inline)',
+      });
+
+      const msg = await spyController.produceRestatement();
+      expect(msg.restated_intent).toBe('Restatement: Cleaned intent');
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.cleanedIntent).toBe('Cleaned intent');
+      expect(seen[0]!.cleanedIntent).not.toContain('Verbatim');
+      expect(seen[0]!.contextBlock).toContain('src/a.ts');
+    });
+
+    it('preserves intent_file_refs across a correction', async () => {
+      await controller.captureIntent('Original', ['src/a.ts'], {
+        cleanedIntent: 'Original',
+        intentFileRefs: [{ path: 'src/a.ts', source: 'inline' }],
+      });
+      await controller.submitApproval('Restatement: Original', {
+        approved: false,
+        correction: 'Corrected intent',
+      });
+
+      const newId = machine.sessionState.artifacts.intent_capture_id!;
+      const newCapture = await store.get('intent-capture-v1', newId);
+      expect(newCapture?.user_intent_verbatim).toBe('Corrected intent');
+      expect(newCapture?.cleaned_user_intent).toBe('Corrected intent');
+      expect(newCapture?.intent_file_refs).toEqual([{ path: 'src/a.ts', source: 'inline' }]);
+      expect(newCapture?.tagged_files).toEqual(['src/a.ts']);
+    });
+
     it('transitions stage machine to restatement', async () => {
       await controller.captureIntent('Fix the login bug');
       expect(machine.currentStage).toBe('restatement');

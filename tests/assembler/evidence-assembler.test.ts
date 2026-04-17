@@ -9,7 +9,10 @@ import {
 import { ArtifactStore } from '../../src/artifacts/store.ts';
 import { createConfig } from '../../src/runtime/config.ts';
 import { validateArtifact } from '../../src/artifacts/schemas.ts';
-import { createRecommendedEvidencePlan } from '../../src/conductor/evidence-plan.ts';
+import {
+  createEvidencePlan,
+  createRecommendedEvidencePlan,
+} from '../../src/conductor/evidence-plan.ts';
 import type {
   RetrievalIndexV1,
   EvidencePlanV1,
@@ -695,6 +698,86 @@ describe('evidence assembler — materialize mode', () => {
     expect(bundle!.structural_context.files[0]!.path).toContain('main.ts');
     for (const ev of bundle!.raw_evidence) {
       expect(ev.path).toContain('main.ts');
+    }
+  });
+
+  it('retriever-authored default plan is narrower than the legacy summary-everything baseline', async () => {
+    await setupRepoFiles();
+    const index = makeIndex();
+    // Mark f2 reserve-only so the retriever excludes it from the default plan,
+    // but the legacy "summary for every file" heuristic still includes it.
+    index.files[1]!.selection_tier = 'reserve';
+    index.files[1]!.default_evidence_mode = 'exclude';
+    index.recommended_evidence = {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 0 }],
+        },
+      ],
+      include_cross_file_findings: true,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+    index.files[0]!.symbols[0]!.selected_by_default = true;
+    index.files[0]!.symbols[0]!.default_neighbor_lines = 0;
+
+    const recommendedPlan = createRecommendedEvidencePlan(index);
+
+    // Legacy baseline: summary+AST for every index file, the pre-agentic
+    // heuristic default before the retriever authored its own scope.
+    const legacyPlan = createEvidencePlan({
+      retrieval_index: index,
+      file_controls: index.files.map((f) => ({
+        file_id: f.file_id,
+        include_retriever_summary: true,
+        include_ast_skeleton: true,
+      })),
+    });
+
+    // Narrowness invariant at the plan level.
+    expect(recommendedPlan.selection.files.length).toBeLessThan(legacyPlan.selection.files.length);
+    const recommendedIds = new Set(recommendedPlan.selection.files.map((f) => f.file_id));
+    expect(recommendedIds.has('f2')).toBe(false);
+
+    // And at the materialized-bundle level: the retriever-authored default
+    // produces a strictly smaller bundle than the legacy baseline.
+    await seedArtifacts(index, recommendedPlan);
+    const legacyPlanStored: EvidencePlanV1 = { ...legacyPlan, artifact_id: 'plan_legacy_test' };
+    await store.put(legacyPlanStored);
+
+    const recommendedResult = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: recommendedPlan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    const legacyResult = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: legacyPlanStored.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    expect(recommendedResult.status).toBe('success');
+    expect(legacyResult.status).toBe('success');
+
+    const recommendedBundle = await store.get(
+      'evidence-bundle-v1',
+      recommendedResult.evidence_bundle_id!,
+    );
+    const legacyBundle = await store.get('evidence-bundle-v1', legacyResult.evidence_bundle_id!);
+    expect(recommendedBundle!.structural_context.files.length).toBeLessThan(
+      legacyBundle!.structural_context.files.length,
+    );
+    for (const f of recommendedBundle!.structural_context.files) {
+      expect(f.path).toContain('main.ts');
     }
   });
 });
