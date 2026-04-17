@@ -52,12 +52,17 @@ describe('normalization golden tests', () => {
     const raw: RawRetrievalOutput = {
       query: 'find database connection logic',
       confidence: 'high',
+      strategy_summary: 'scout narrowed to db connection primitives; agent confirmed pool owner',
+      scout_terms: ['pool', 'connect', 'migrations'],
       files: [
         {
           path: 'src/db/connection.ts',
           why_relevant: 'Database connection module',
           file_summary: 'Manages database connections and pooling',
           ast_skeleton: ['function connect()', 'class ConnectionPool'],
+          selection_tier: 'selected',
+          selection_reason: 'Primary connection owner',
+          default_evidence_mode: 'spans',
           raw_content: [
             'import pg from "pg";',
             'const DB_PASSWORD = "super-secret-password";',
@@ -76,6 +81,9 @@ describe('normalization golden tests', () => {
               start: 3,
               count: 3,
               summary: 'Creates a connection',
+              selected_by_default: true,
+              default_neighbor_lines: 2,
+              selection_reason: 'Primary connection entrypoint',
             },
             {
               kind: 'class',
@@ -90,6 +98,9 @@ describe('normalization golden tests', () => {
           path: 'src/db/migrations.ts',
           why_relevant: 'Migration runner',
           file_summary: 'Runs database migrations',
+          selection_tier: 'reserve',
+          selection_reason: 'Only relevant if migration regression suspected',
+          default_evidence_mode: 'summary',
           raw_content: 'export async function runMigrations() { /* ... */ }',
           symbols: [{ kind: 'function', name: 'runMigrations', start: 1, count: 1 }],
         },
@@ -113,7 +124,7 @@ describe('normalization golden tests', () => {
     const artifact = result.artifact;
     const serialized = JSON.stringify(artifact);
 
-    // No raw content should appear
+    // No raw content should appear anywhere in the stored artifact
     expect(serialized).not.toContain('raw_content');
     expect(serialized).not.toContain('super-secret-password');
     expect(serialized).not.toContain('pg.Pool');
@@ -131,6 +142,38 @@ describe('normalization golden tests', () => {
     );
     expect(artifact.gaps).toContain('Redis caching layer not found');
     expect(artifact.followup_queries).toContain('redis cache configuration');
+
+    // New structural fields are propagated
+    expect(artifact.strategy_summary).toBe(
+      'scout narrowed to db connection primitives; agent confirmed pool owner',
+    );
+    expect(artifact.scout_terms).toEqual(['pool', 'connect', 'migrations']);
+    expect(artifact.files[0]!.selection_tier).toBe('selected');
+    expect(artifact.files[0]!.default_evidence_mode).toBe('spans');
+    expect(artifact.files[1]!.selection_tier).toBe('reserve');
+    expect(artifact.files[1]!.default_evidence_mode).toBe('summary');
+
+    // recommended_evidence: selected-tier file included, reserve-tier omitted,
+    // and the default span for the first symbol is present with neighbor lines.
+    const rec = artifact.recommended_evidence;
+    expect(rec.files).toHaveLength(1);
+    expect(rec.files[0]!.file_id).toBe(artifact.files[0]!.file_id);
+    expect(rec.files[0]!.include_ast_skeleton).toBe(true);
+    expect(rec.files[0]!.include_retriever_summary).toBe(true);
+    expect(rec.files[0]!.include_entire_file).toBe(false);
+    expect(rec.files[0]!.spans).toHaveLength(1);
+    expect(rec.files[0]!.spans[0]!.symbol_id).toBe(artifact.files[0]!.symbols[0]!.symbol_id);
+    expect(rec.files[0]!.spans[0]!.include_span).toBe(true);
+    expect(rec.files[0]!.spans[0]!.neighbor_lines).toBe(2);
+
+    // Reserve-tier file must not contribute to the default evidence scope.
+    const reserveFileId = artifact.files[1]!.file_id;
+    expect(rec.files.some((f) => f.file_id === reserveFileId)).toBe(false);
+
+    // Top-level include flags default from cross-file/gaps presence.
+    expect(rec.include_cross_file_findings).toBe(true);
+    expect(rec.include_gaps).toBe(true);
+    expect(rec.include_followup_queries).toBe(false);
   });
 
   test('schema validation passes for normalized retrieval-index-v1', () => {

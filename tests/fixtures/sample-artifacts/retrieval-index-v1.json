@@ -6,8 +6,13 @@
   "intent_spec_id": "spec_001",
   "query": "Understand model restore flow and modification boundaries",
   "confidence": "high",
-  "strategy_summary": "Scout-narrowed candidates, agent-confirmed restore entrypoint and registry auth dependency.",
-  "scout_terms": ["restoreModelFromSession", "model-resolver", "model-registry"],
+  "strategy_summary": "Scout narrowed to restore entrypoint + registry auth dependency; agent confirmed one primary file and kept the registry auth as reserve.",
+  "scout_terms": [
+    "restoreModelFromSession",
+    "model-resolver",
+    "model-registry",
+    "hasConfiguredAuth"
+  ],
   "files": [
     {
       "file_id": "f1",
@@ -44,6 +49,25 @@
           "selected_by_default": true,
           "default_neighbor_lines": 4,
           "selection_reason": "Exact restore decision logic lives here"
+        },
+        {
+          "symbol_id": "s2",
+          "kind": "function",
+          "name": "findInitialModel",
+          "start": 310,
+          "count": 40,
+          "summary": "Resolves the initial model when no session exists",
+          "role_in_system": "initial model resolver",
+          "depends_on": [],
+          "used_by": ["cli boot"],
+          "relevance": "medium",
+          "change_likelihood": "low",
+          "expansion_priority": "low",
+          "recommended_expansion": "none",
+          "expansion_reason": "Not part of restore path",
+          "selected_by_default": false,
+          "default_neighbor_lines": 0,
+          "selection_reason": "Adjacent helper — not part of default restore scope"
         }
       ]
     },
@@ -60,7 +84,7 @@
       "default_evidence_mode": "summary",
       "symbols": [
         {
-          "symbol_id": "s2",
+          "symbol_id": "s3",
           "kind": "function",
           "name": "hasConfiguredAuth",
           "start": 88,

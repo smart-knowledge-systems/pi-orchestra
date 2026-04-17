@@ -214,6 +214,103 @@ describe('inspectRetrievalResult', () => {
     expect(result.inspection!.gaps).toContain('Missing tests');
   });
 
+  test('surfaces strategy metadata, tiers, default modes, and recommended scope', async () => {
+    const normalized = normalizeRetrievalOutput({
+      raw: {
+        query: 'restore flow',
+        confidence: 'high',
+        strategy_summary: 'focus on restore entrypoint; keep registry auth as reserve',
+        scout_terms: ['restoreModelFromSession', 'hasConfiguredAuth'],
+        files: [
+          {
+            path: '/abs/src/core/model-resolver.ts',
+            why_relevant: 'Primary restore entrypoint',
+            file_summary: 'Model resolution + restore fallback',
+            ast_skeleton: ['function restoreModelFromSession(...)'],
+            selection_tier: 'selected',
+            selection_reason: 'Agent confirmed primary restore flow',
+            default_evidence_mode: 'spans',
+            symbols: [
+              {
+                kind: 'function',
+                name: 'restoreModelFromSession',
+                start: 420,
+                count: 70,
+                summary: 'Restore or fallback',
+                selected_by_default: true,
+                default_neighbor_lines: 4,
+                selection_reason: 'Exact restore decision logic',
+              },
+            ],
+          },
+          {
+            path: '/abs/src/core/model-registry.ts',
+            why_relevant: 'Supports auth predicate',
+            file_summary: 'Registry lookup + auth checks',
+            selection_tier: 'reserve',
+            selection_reason: 'Only if auth resolution is in scope',
+            default_evidence_mode: 'summary',
+            symbols: [
+              {
+                kind: 'function',
+                name: 'hasConfiguredAuth',
+                start: 88,
+                count: 24,
+                summary: 'Auth predicate',
+              },
+            ],
+          },
+        ],
+        cross_file_findings: ['Restore depends on auth resolution'],
+        gaps: ['auth predicate semantics undocumented'],
+        followup_queries: ['model registry auth details'],
+        include_followup_queries: false,
+      },
+      repoRoot: '/abs',
+      intentCaptureId: 'c_scope',
+      intentRestatementId: 'r_scope',
+      intentSpecId: null,
+    });
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) return;
+    await store.put(normalized.artifact);
+
+    const result = await inspectRetrievalResult(store, normalized.artifact.artifact_id);
+    expect(result.success).toBe(true);
+    const inspection = result.inspection;
+    expect(inspection).not.toBeNull();
+    if (!inspection) return;
+
+    expect(inspection.strategy_summary).toContain('restore entrypoint');
+    expect(inspection.scout_terms).toContain('restoreModelFromSession');
+    expect(inspection.file_count).toBe(2);
+    expect(inspection.selected_file_count).toBe(1);
+    expect(inspection.reserve_file_count).toBe(1);
+
+    const selected = inspection.files.find((f) => f.selection_tier === 'selected');
+    const reserve = inspection.files.find((f) => f.selection_tier === 'reserve');
+    expect(selected).toBeDefined();
+    expect(reserve).toBeDefined();
+    expect(selected!.default_evidence_mode).toBe('spans');
+    expect(reserve!.default_evidence_mode).toBe('summary');
+    expect(selected!.symbols[0]!.selected_by_default).toBe(true);
+    expect(selected!.symbols[0]!.default_neighbor_lines).toBe(4);
+
+    // recommended_evidence reaches the conductor verbatim, excluding reserve
+    const rec = inspection.recommended_evidence;
+    expect(rec.files).toHaveLength(1);
+    expect(rec.files[0]!.file_id).toBe(selected!.file_id);
+    expect(rec.files[0]!.spans[0]!.neighbor_lines).toBe(4);
+    expect(rec.files.some((f) => f.file_id === reserve!.file_id)).toBe(false);
+    expect(rec.include_cross_file_findings).toBe(true);
+    expect(rec.include_gaps).toBe(true);
+    expect(rec.include_followup_queries).toBe(false);
+
+    // Inspection must stay text-safe — no raw content leaks regardless of tier
+    const serialized = JSON.stringify(inspection);
+    expect(serialized).not.toContain('raw_content');
+  });
+
   test('returns error for missing retrieval artifact', async () => {
     const result = await inspectRetrievalResult(store, 'nonexistent_id');
     expect(result.success).toBe(false);
