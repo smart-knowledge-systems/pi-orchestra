@@ -15,7 +15,7 @@ It coordinates a staged pipeline:
 7. Optionally hand off execution
 8. Optionally restart recursively from the result
 
-## What it explicitly does *not* do
+## What it explicitly does _not_ do
 
 The key design rule is:
 
@@ -37,6 +37,7 @@ That boundary is described in `docs/specification/00-overview.md` and enforced i
 ## How it works, stage by stage
 
 ### 1. Extension boot
+
 `extensions/conductor-extension.ts`
 
 On startup, the extension:
@@ -49,6 +50,7 @@ On startup, the extension:
 It **does not expose raw file tools** to conductor logic.
 
 ### 2. Stage machine
+
 `src/conductor/stage-machine.ts`
 
 The conductor runs through a strict state machine:
@@ -66,6 +68,7 @@ The `StageMachine` persists session state and artifact pointers as it moves.
 So the conductor is not just “prompting”; it’s operating over persisted workflow state.
 
 ### 3. Stage 1: restatement + approval
+
 `src/conductor/stage-1.ts`
 
 This is the first real conductor behavior.
@@ -82,6 +85,7 @@ It:
 If expansion is declined, it can move directly to retrieval.
 
 ### 4. Optional expansion
+
 `src/conductor/expansion.ts`
 
 If requested, the conductor sends:
@@ -93,6 +97,7 @@ If requested, the conductor sends:
 for a fuller spec. The user then reviews and approves/revises that spec before continuing.
 
 ### 5. Retrieval
+
 `src/conductor/retrieval.ts`  
 `src/retriever/worker.ts`
 
@@ -115,6 +120,7 @@ So the conductor sees things like:
 but not raw source.
 
 ### 6. Evidence planning
+
 `src/conductor/evidence-plan.ts`
 
 This is where the conductor makes decisions.
@@ -134,9 +140,10 @@ It then creates `evidence-plan-v1`.
 Important detail: the plan embeds a reference to the retrieval index unchanged, and the actual raw materialization is left to the deterministic assembler.
 
 ### 7. Deterministic evidence assembly
+
 `src/services/evidence-assembler.ts`
 
-This is *not* conductor reasoning.
+This is _not_ conductor reasoning.
 
 The assembler takes:
 
@@ -148,6 +155,7 @@ and deterministically produces `evidence-bundle-v1`.
 That bundle is where raw code can finally appear for downstream use.
 
 ### 8. Synthesis
+
 `src/conductor/synthesis.ts`
 
 The conductor chooses the synthesis mode heuristically:
@@ -163,6 +171,7 @@ Then a synthesis worker produces either:
 The conductor also renders those results for the user in a safe way, without leaking raw evidence internals.
 
 ### 9. Optional execution
+
 `src/services/execution-dispatch.ts`
 
 If the synthesis output is actionable and edits are allowed, an execution worker can:
@@ -174,6 +183,7 @@ If the synthesis output is actionable and edits are allowed, an execution worker
 The conductor does not directly edit files itself in this architecture.
 
 ### 10. Recursive restart
+
 `src/conductor/recursive-intent.ts`
 
 A synthesis result can be promoted into a new intent.

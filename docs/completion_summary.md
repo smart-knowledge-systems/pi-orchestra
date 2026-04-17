@@ -76,6 +76,7 @@ All 376 tests pass under `bun test`; `tsc --noEmit` is clean.
 The implementation landed across 46 commits from repo init to Phase 6 completion. Key milestones, oldest first:
 
 ### Repo scaffold and conventions
+
 - `41eddea` initialize pi-orchestra repository scaffold
 - `dbf35f1` add conductor workflow specification
 - `d952870` add piorx wrapper and extension entrypoint
@@ -91,6 +92,7 @@ The implementation landed across 46 commits from repo init to Phase 6 completion
 - `8094b0f` add typescript and @types/bun devDependencies
 
 ### Phase 1 — scaffolding, artifacts, runtime skeleton
+
 - `f12fecb` apply prettier formatting to docs and extension stub
 - `70f75e4` replace mapfile with portable array helper (script fix)
 - `2cfb8ce` scaffold v1 artifact types, validators, and id/path helpers (P1-T1..T3)
@@ -105,18 +107,21 @@ The implementation landed across 46 commits from repo init to Phase 6 completion
 - `fceb9f0` add stub service contracts (P1-T8)
 
 ### Phase 2 — Stage 1 restatement loop and expansion plumbing
+
 - `2e52042` implement stage-1 intent capture and restatement (P2-T1)
 - `a798ff3` correct array assignment in read_lines_into_array
 - `72531fe` implement expansion inclusion protocol (P2-T2)
 - `fa2cf2f` mark P2-T1 and P2-T2 as completed
 
 ### Phase 3 — retrieval dispatch and artifact handling
+
 - `2d9071c` implement retrieval dispatch with worker, normalization, and artifact inspection (P3-T2/T3/T4)
 - `7f56e7c` wire retrieval-dispatch to orchestrate retriever and normalize pipeline
 - `f067ae4` decompose phases 3-6 into granular tasks and log phase-3 completion
 - `afd5ba8` improve array handling robustness in auto-implement loop
 
 ### Phase 4 — evidence planning and deterministic assembler
+
 - `55fee0a` implement span and budget utilities with evidence preview (P4-T2, P4-T3)
 - `75fa24f` mark P3-T2, P4-T2, P4-T3 as completed
 - `923cc5e` implement evidence plan authoring helpers (P4-T4)
@@ -125,12 +130,14 @@ The implementation landed across 46 commits from repo init to Phase 6 completion
 - `918b21d` mark P4-T4, P4-T5, P4-T6 as completed
 
 ### Phase 5 — synthesis dispatch
+
 - `0711447` add prompt assembly and worker modules (P5-T2, P5-T3)
 - `952f61b` implement synthesis dispatch service
 - `2e3f82f` mark P5-T2 and P5-T3 as completed
 - `8683b19` implement task-type selection and rendering (P5-T4)
 
 ### Phase 6 — execution dispatch and recursive restart
+
 - `9bfa9de` implement execution worker with safety constraints (P6-T2, P6-T3)
 - `4b6b2f3` mark P5-T4, P6-T2, P6-T3 as completed
 - `72d3bd3` implement artifact promotion and recursive intent handling (P6-T4, P6-T5)
