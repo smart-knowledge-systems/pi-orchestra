@@ -12,21 +12,21 @@ This document is not the original architectural spec — those live at `/Users/r
 
 - **`/Users/russfugal/code/sks/piorx/package.json`** — package `pi-orchestra` v0.1.0, `type: module`, exposes one bin: `piorx → ./bin/piorx`. Scripts: `test` (bun test), `typecheck` (tsc --noEmit), `lint` (biome), `check`, `format`, `install:pi`, `doctor`, `smoke`. Runtime devDeps only (`@types/bun`, `biome`, `prettier`, `typescript`) — no `@anthropic-ai/sdk`, `@sinclair/typebox`, or `zod` at the project level. The SDK bridge is provided by the globally-installed `@mariozechner/pi-coding-agent` host.
 - **`/Users/russfugal/code/sks/piorx/bin/piorx`** — bash wrapper that resolves the repo-local extension and invokes `pi -e extensions/conductor-extension.ts "$@"`. Requires `pi` on PATH (installed via `scripts/install-pi.sh` → `bun add -g @mariozechner/pi-coding-agent`).
-- **`/Users/russfugal/code/sks/piorx/extensions/conductor-extension.ts`** — the single extension entrypoint (~1,037 lines). Bootstraps config, artifact store, and stage machine on `session_start`; intercepts user text on `input` from idle stage; drives the entire 6-stage pipeline.
+- **`/Users/russfugal/code/sks/piorx/extensions/conductor-extension.ts`** — the single extension entrypoint (~1,280 lines). Bootstraps config, artifact store, and stage machine on `session_start`; intercepts user text on `input` from idle stage; drives the entire 6-stage pipeline; parses `<file name="...">...</file>` blocks in the initial intent before restatement; prompts for narrow evidence overrides between plan generation and materialization.
 
 ### 1.2 The 6-stage conductor workflow + recursive restart
 
 Fully implemented end-to-end in `conductor-extension.ts` with per-stage controllers in `src/conductor/`:
 
-| Stage                   | Controller                               | Service dispatch                                     | Worker                                 | Output artifact                              |
-| ----------------------- | ---------------------------------------- | ---------------------------------------------------- | -------------------------------------- | -------------------------------------------- |
-| 1. Intent restatement   | `src/conductor/stage-1.ts`               | —                                                    | direct model call (`restateWithModel`) | `intent-capture-v1`, `intent-restatement-v1` |
-| 2. Expansion (optional) | `src/conductor/expansion.ts`             | `src/services/intent-expand.ts` (stub contract only) | direct model call (`expandWithModel`)  | `expansion-input-v1`, `intent-spec-v1`       |
-| 3. Retrieval            | `src/conductor/retrieval.ts` (gate only) | `src/services/retrieval-dispatch.ts`                 | `src/retriever/worker.ts`              | `retrieval-index-v1`                         |
-| 4. Evidence             | `src/conductor/evidence-plan.ts`         | `src/services/evidence-assembler.ts`                 | — (deterministic)                      | `evidence-plan-v1`, `evidence-bundle-v1`     |
-| 5. Synthesis            | `src/conductor/synthesis.ts`             | `src/services/synthesis-dispatch.ts`                 | `src/synthesis/worker.ts` (stub)       | `analysis-report-v1` or `change-spec-v1`     |
-| 6. Execution            | —                                        | `src/services/execution-dispatch.ts`                 | `src/execution/worker.ts` (stub)       | `execution-report-v1`                        |
-| Recursive               | `src/conductor/recursive-intent.ts`      | `src/services/artifact-promote.ts`                   | —                                      | `recursive-intent-v1`                        |
+| Stage                   | Controller                               | Service dispatch                                     | Worker                                                                              | Output artifact                              |
+| ----------------------- | ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------- |
+| 1. Intent restatement   | `src/conductor/stage-1.ts`               | —                                                    | direct model call (`restateWithModel`); `src/util/intent-files.ts` pre-parses files | `intent-capture-v1`, `intent-restatement-v1` |
+| 2. Expansion (optional) | `src/conductor/expansion.ts`             | `src/services/intent-expand.ts` (stub contract only) | direct model call (`expandWithModel`)                                               | `expansion-input-v1`, `intent-spec-v1`       |
+| 3. Retrieval            | `src/conductor/retrieval.ts` (gate only) | `src/services/retrieval-dispatch.ts`                 | `src/retriever/scout.ts` + `src/retriever/agent.ts` (bounded) + `worker.ts`         | `retrieval-index-v1`                         |
+| 4. Evidence             | `src/conductor/evidence-plan.ts` + `src/conductor/evidence-overrides.ts` | `src/services/evidence-assembler.ts`                 | — (deterministic)                                                                   | `evidence-plan-v1`, `evidence-bundle-v1`     |
+| 5. Synthesis            | `src/conductor/synthesis.ts`             | `src/services/synthesis-dispatch.ts`                 | `src/synthesis/worker.ts` (stub)                                                    | `analysis-report-v1` or `change-spec-v1`     |
+| 6. Execution            | —                                        | `src/services/execution-dispatch.ts`                 | `src/execution/worker.ts` (stub)                                                    | `execution-report-v1`                        |
+| Recursive               | `src/conductor/recursive-intent.ts`      | `src/services/artifact-promote.ts`                   | —                                                                                   | `recursive-intent-v1`                        |
 
 State transitions are enforced by the `StageMachine` class in `/Users/russfugal/code/sks/piorx/src/conductor/stage-machine.ts`, which wraps the pure session-state helpers in `/Users/russfugal/code/sks/piorx/src/runtime/session-state.ts` and persists every mutation to `.pi/session-state.json`.
 
@@ -48,10 +48,17 @@ Defined as a discriminated union on `artifact_type` in `/Users/russfugal/code/sk
 
 Each type has a directory under `.pi/artifacts/` (see `/Users/russfugal/code/sks/piorx/src/runtime/paths.ts`). Artifacts are immutable; revisions create new IDs, with lineage tracked in session state.
 
+The v1 shapes have grown in place (no version bumps — see §3.5) to support the agentic retrieval architecture landed in April 2026:
+
+- **`intent-capture-v1`** now carries `cleaned_user_intent` (raw intent minus `<file>` blocks) and optional `intent_file_refs: Array<{ path; source: 'inline' | 'reference-only' | 'disk' }>` so downstream stages work from a clean intent without inheriting giant inline file bodies.
+- **`retrieval-index-v1`** adds `strategy_summary`, `scout_terms`, per-file `selection_tier: 'selected' | 'reserve'` + `selection_reason` + `default_evidence_mode: 'exclude' | 'summary' | 'summary+ast' | 'spans' | 'whole_file'`, per-symbol `selected_by_default` + `default_neighbor_lines` + `selection_reason`, and a top-level `recommended_evidence` block that is the retriever's authored default evidence plan (file include-flag triple + per-symbol span selections + three top-level `include_*` toggles). Still structural-only: no raw file bodies are stored or inspectable.
+- **`evidence-plan-v1`** is built from `recommended_evidence` by `createRecommendedEvidencePlan(index, options?)` in `/Users/russfugal/code/sks/piorx/src/conductor/evidence-plan.ts`. The conductor may then patch that default through the narrow `applyEvidenceOverrides` API in `/Users/russfugal/code/sks/piorx/src/conductor/evidence-overrides.ts` — nine deterministic operations (`promote_file`, `demote_file`, `set_file_mode`, `include_symbol`, `exclude_symbol`, `set_neighbor_lines`, and three `toggle_*` flags) that validate every file/symbol reference against the retrieval artifact.
+
 ### 1.4 Hard architectural boundaries (enforced in code and tests)
 
-- **Conductor opacity.** No file-reading tools imported into `/Users/russfugal/code/sks/piorx/src/conductor/**`. File I/O lives only in the retriever worker, the evidence assembler, and the execution worker.
-- **Planned exception: user-supplied intent files.** The next revision should allow the conductor to read files explicitly included in the initial user intent _before restatement only_ (e.g. pi CLI `@file` expansions rendered as `<file name="...">...</file>` blocks). This is a narrow exception for user-provided context, not a general repo-reading capability.
+- **Conductor opacity.** No file-reading tools imported into `/Users/russfugal/code/sks/piorx/src/conductor/**`. File I/O lives only in the retriever worker/scout/agent/executor, the evidence assembler, and the execution worker.
+- **Exception: user-supplied intent files (shipped).** `/Users/russfugal/code/sks/piorx/src/util/intent-files.ts` parses `<file name="...">...</file>` blocks from the initial user input and produces a bounded `restatementContext` that the conductor hands to `restateWithModel`. Those paths become `intent_file_refs` + `tagged_files` on `intent-capture-v1`. This is a narrow, pre-restatement exception — no general repo-reading capability is exposed.
+- **Retriever boundary (shipped agentic form).** The retriever is now two-phase: a deterministic `src/retriever/scout.ts` narrows to ≤8 selected + ≤4 reserve candidates, and `src/retriever/agent.ts` drives a bounded model-driven loop (defaults: 3 rounds, 4 actions/round, 12 file reads total, 200 lines / 16 KiB / read, 256 KiB total observation budget) whose actions (`read_file`, `search_content`, `search_paths`, `follow_imports`) run through `src/retriever/executor.ts`'s repo-root-sandboxed executors. The pi-host model callback is injected at the extension edge (`makeRetrieverAgentModel` in `extensions/conductor-extension.ts`); `src/retriever/**` has no `pi-ai` / `pi-coding-agent` imports. Raw file contents never leave the retriever boundary — `retrieval-index-v1` remains structural-only.
 - **Retriever response embedding.** `evidence-plan-v1` embeds the full `retrieval-index-v1` byte-for-byte; `verifyEmbeddedIndex()` in `/Users/russfugal/code/sks/piorx/src/conductor/evidence-plan.ts` enforces equality.
 - **Deterministic evidence assembly.** Same plan + index + repo state → byte-identical bundle. Verified by `/Users/russfugal/code/sks/piorx/tests/assembler/determinism.test.ts` (4 tests).
 - **No silent pruning.** `/Users/russfugal/code/sks/piorx/src/util/budget.ts` returns structured `over_budget_reasons` rather than trimming; the assembler refuses unknown file/symbol IDs.
@@ -79,15 +86,18 @@ Model invocation uses `@mariozechner/pi-ai`'s `complete()` via the helper `getMo
 
 ### 1.7 Test coverage
 
-376 passing tests across 20 files under `/Users/russfugal/code/sks/piorx/tests/`: `artifacts/` (47), `assembler/` (104), `conductor/` (45), `execution/` (31), `interaction/` (68), `retriever/` (51), `synthesis/` (34), plus fixtures. `tsc --noEmit` is clean. CI is wired at `/Users/russfugal/code/sks/piorx/.github/workflows/ci.yml`.
+498 passing tests across 28 files under `/Users/russfugal/code/sks/piorx/tests/`: `artifacts/` (51), `assembler/` (186), `conductor/` (40), `execution/` (26), `interaction/` (77), `retriever/` (84), `synthesis/` (34), plus fixtures. Notable additions from the agentic-retrieval work: `tests/retriever/scout.test.ts` and `tests/retriever/agent.test.ts` exercise the scout + bounded agent loop with a queue-backed `AgentModelCallback`; `tests/assembler/evidence-overrides.test.ts` covers the full override op matrix (success + failure paths + span-seeding semantics); `tests/interaction/agentic-retrieval-flow.test.ts` runs the end-to-end Stage 1 → retrieval dispatch → `createRecommendedEvidencePlan` → assembler flow both scout-only and agent-driven. `tsc --noEmit` is clean. CI is wired at `/Users/russfugal/code/sks/piorx/.github/workflows/ci.yml`.
 
 ### 1.8 Planning artifacts at the repo root
 
 - **`/Users/russfugal/code/sks/piorx/HANDOFF_PROMPT.md`** — initial instruction to the implementer; points at `docs/specification/` and asks for a phased plan.
-- **`/Users/russfugal/code/sks/piorx/implementation-phase-1.md`** — the phased plan itself; 6 phases, per-phase scope/files/interfaces/tests/exit criteria; explicitly defers batch queuing.
+- **`/Users/russfugal/code/sks/piorx/implementation-phase-1.md`** — the original phased plan; 6 phases, per-phase scope/files/interfaces/tests/exit criteria; explicitly defers batch queuing.
 - **`/Users/russfugal/code/sks/piorx/implementation-tasks.json`** — 27 tasks (P1-T1 … P6-T5), all marked complete.
-- **`/Users/russfugal/code/sks/piorx/dev-log.txt`** — chronological session log.
-- **`/Users/russfugal/code/sks/piorx/docs/completion_summary.md`** — phase-by-phase summary of what shipped.
+- **`/Users/russfugal/code/sks/piorx/implementation-agentic-retrieval.md`** — the 8-sprint plan for the agentic-retrieval redesign (AR-P1 … AR-P8): intent-file context, deterministic scout, bounded retriever agent, structural retrieval artifact, retriever-authored default evidence plan, narrow conductor overrides, extension wiring, and docs + regression tests. See §3.4 below.
+- **`/Users/russfugal/code/sks/piorx/agentic-retrieval-tasks.json`** — the per-sprint task tracker for the agentic-retrieval work; all AR-P1 through AR-P8 tasks marked complete.
+- **`/Users/russfugal/code/sks/piorx/agentic-retrieval-dev-log.txt`** — chronological dev log for the agentic-retrieval sprints.
+- **`/Users/russfugal/code/sks/piorx/dev-log.txt`** — chronological session log for the original 6-phase build-out.
+- **`/Users/russfugal/code/sks/piorx/docs/completion_summary.md`** — phase-by-phase summary of what shipped in the original build-out.
 - **`/Users/russfugal/code/sks/piorx/docs/batch-api-assessment.md`** — post-hoc analysis of how batch support would be added (see §3.1 below).
 
 ---
@@ -148,61 +158,49 @@ Both are stubs:
 
 Everything around them — dispatch, validation, storage, stage transitions, schema enforcement, constraint checking (`allow_edits`, `run_validation`) — is production-quality and thoroughly tested. The hollow core is the main gap between piorx and something you'd use in anger.
 
-### 3.4 Retrieval roadmap — bounded, agentic, and still conductor-safe
+### 3.4 Retrieval — shipped agentic design (AR-P1 … AR-P8, April 2026)
 
-The biggest architectural refinement now worth making is to **move relevance and default evidence-scoping decisions into the retriever**, while keeping the conductor structurally blind to raw repository content.
+The retrieval redesign laid out in earlier revisions of this spec is **now implemented**. The full plan is in `/Users/russfugal/code/sks/piorx/implementation-agentic-retrieval.md`; the sprint-by-sprint log is in `/Users/russfugal/code/sks/piorx/agentic-retrieval-dev-log.txt`. At a glance:
 
-The intended design is:
+1. **Stage 1 user-intent file context** — `src/util/intent-files.ts` parses `<file name="...">...</file>` blocks, produces a bounded `restatementContext`, and records the paths as `intent_file_refs` + `tagged_files` on `intent-capture-v1`. `cleaned_user_intent` is the raw intent minus those blocks and is what flows to retrieval/expansion.
+2. **Deterministic scout** — `src/retriever/scout.ts` builds curated terms weighted by provenance (focus=4, tag=3, restatement=2, intent=1, stop-word filtered, capped at 24), walks the repo in sorted order, and returns ≤8 selected + ≤4 reserve candidates with per-file roles, `default_evidence_mode` hints, top symbol hints, and AST skeletons. Tagged files get a +50 boost.
+3. **Bounded retriever agent** — `src/retriever/agent.ts` runs a ≤3-round loop driven by an injected `AgentModelCallback`. Actions (`read_file`, `search_content`, `search_paths`, `follow_imports`) run through `src/retriever/executor.ts`'s repo-root-sandboxed executors with hard caps on file reads (12), per-read lines (200) and bytes (16 KiB), and total observation budget (256 KiB). `stopReason` values: `agent_stopped`, `round_cap`, `action_cap`, `model_error`, `parse_error` — the last two fall back to a scout-synthesized recommendation.
+4. **Structural-only retrieval artifact** — `src/retriever/normalize.ts` strips raw content from worker/agent output and builds `recommended_evidence` from `selected_by_default` symbols and per-file include flags. `src/services/artifact-inspect.ts` still refuses to return raw bodies; `retrieval-index-v1` contains only structural metadata.
+5. **Retriever-authored default evidence plan** — `createRecommendedEvidencePlan(index, options?)` in `src/conductor/evidence-plan.ts` copies `recommended_evidence.files` into `selection.files` byte-for-byte (include flags + spans + neighbor_lines), validates every file/symbol reference, excludes reserve-tier files unless explicitly promoted, and is the default path in the Stage 4 extension flow. The old summary+first-two-spans heuristic is gone.
+6. **Narrow conductor overrides** — `src/conductor/evidence-overrides.ts` exposes nine deterministic operations over the retriever default (`promote_file`, `demote_file`, `set_file_mode`, `include_symbol`, `exclude_symbol`, `set_neighbor_lines`, three `toggle_*` flags). The extension wires `OVERRIDE_HELP` + a JSON-array prompt into Stage 4 between plan generation and materialization; parse/validation errors leave the retriever default intact. Two load-bearing rules reconciled with the assembler: `promote_file` with `mode='spans'` seeds spans from retrieval metadata (and throws if no seed exists), and `set_file_mode` clears stale spans on `summary`/`summary+ast` and splices the file out on `exclude`. See `docs/specification/03-prompts-and-protocol.md` §10 for full semantics.
 
-1. **Initial user-intent file context for Stage 1.** If the user includes files directly in the initial intent (for example via pi CLI `@file` expansion into `<file name="...">...</file>` blocks), the conductor may read and use those files _before_ restatement. Those paths should also become `tagged_files` on `intent-capture-v1`. This is the only planned conductor-side file-reading exception.
-2. **Deterministic scout pass.** The retriever should first run a narrow, code-executed heuristic pass that crafts curated search terms from the approved intent / retrieval focus / tagged files, scores candidate files and symbols, and returns only the highest-signal candidates.
-3. **Bounded retrieval agent.** A model-driven retriever agent should then be given the scout results plus the approved intent and should be allowed to read repository files directly. The scout does not replace file reading; it narrows the search space for that file-reading agent.
-4. **Structural-only retrieval artifact.** Even though the retriever agent reads raw files, the stored `retrieval-index-v1` should remain conductor-safe and structural only — no raw source payloads.
-5. **Retriever-authored default evidence scope.** The retrieval artifact should stop being merely "interesting files" and instead become a recommended default evidence package: which files deserve summary-only treatment, which symbols deserve spans, which files warrant whole-file inclusion, and why.
-6. **Conductor override, not conductor ownership.** The conductor should usually trust the retriever's recommendations and materialize them directly, but it should have a narrow API for edge-case adjustments (e.g. include a just-below-threshold file, widen neighbor lines, add a symbol span, or force whole-file inclusion in rare cases).
+### 3.4.1 What this changed in responsibility
 
-This is a meaningful shift in responsibility:
+- **Retriever** is now the primary arbiter of relevance and default evidence scope.
+- **Conductor** is a reviewer / policy layer that inspects and selectively amends recommendations without reading raw repo files (except the Stage 1 intent-file exception).
+- **Evidence assembler** stays deterministic: same plan + index + repo state → byte-identical bundle.
 
-- **Retriever** becomes the primary arbiter of relevance and default evidence scope.
-- **Conductor** becomes a reviewer / policy layer that can inspect and selectively amend recommendations without reading raw repo files.
-- **Evidence assembler** remains deterministic and authoritative for turning a plan into raw evidence.
+### 3.4.2 What remains — from this work's original scope
 
-Concretely, this implies the current naive patterns should be replaced:
+- **Retriever-agent prompt is still stubbed in end-to-end tests.** `extensions/conductor-extension.ts` wires a real `AgentModelCallback` via `makeRetrieverAgentModel(ctx)`, and the executor/loop are fully covered by `tests/retriever/agent.test.ts` with a queue-backed callback. Live model runs have not been benchmarked against real repos yet; once synthesis becomes real (§3.3), the agent's round budget and action caps are the next knob to validate.
+- **Symbol extraction is still regex-based** (`src/retriever/symbol-extractor.ts`). The agentic retrieval path is orthogonal to this; upgrading to tree-sitter or ts-morph remains a high-value improvement because it directly sharpens span selection — see §3.7.
 
-- **No more bag-of-words retrieval.** Splitting the intent into arbitrary words and searching them independently is the wrong behavior. The scout should craft intelligent, intent-shaped search terms and path hints instead.
-- **No more conductor-guessed evidence defaults.** The current pattern of including summary context for every retrieved file and taking the first couple of symbols per file should be replaced by a helper that builds the default `evidence-plan-v1` from retriever recommendations.
+### 3.5 Artifact/schema policy — direct v1 edits are allowed (and happened)
 
-A sensible implementation order is:
+Nothing in piorx has shipped externally yet, so **the v1 specs do not need compatibility-preserving version bumps**. The agentic-retrieval work took advantage of this: `intent-capture-v1`, `retrieval-index-v1`, and the semantics of `evidence-plan-v1` were all edited in place — no `-v2` variants were introduced. The one discriminator field (`artifact_type`) is still `*-v1`, and `validateArtifact()` accepts the richer shape because the shape is the v1 shape now.
 
-1. Stage 1 user-intent file reading before restatement.
-2. Deterministic scout-pass refactor.
-3. Bounded model-driven retrieval loop with direct file reading inside the retriever boundary.
-4. Default evidence-plan generation from retrieval recommendations.
-5. Conductor-side plan override API.
-
-### 3.5 Artifact/schema policy — direct v1 edits are allowed
-
-Nothing in piorx has shipped externally yet, so **the v1 specs do not need compatibility-preserving version bumps**. If the retriever and evidence-plan contracts need to change to support the roadmap above, update the existing v1 artifact definitions and validators directly.
-
-In other words: prefer correcting `retrieval-index-v1`, `evidence-plan-v1`, and related helpers in place over inventing premature `-v2` variants.
+Continue this policy: prefer correcting `retrieval-index-v1`, `evidence-plan-v1`, and related helpers in place over inventing premature `-v2` variants until there is a real external consumer to be compatible with.
 
 ### 3.6 The `intentExpand()` stub
 
 `/Users/russfugal/code/sks/piorx/src/services/intent-expand.ts` defines a typed service contract that is never called — expansion actually runs via `ExpansionController` + a direct model call in the extension. Either wire the service through for consistency with the other dispatch services, or delete it. Dead typed contracts accumulate confusion.
 
-### 3.7 Retriever sophistication
+### 3.7 Retriever sophistication — symbol extraction
 
-The regex-based symbol extraction is still an obvious limitation, but it is no longer the only retrieval issue. The more pressing gap is that retrieval is currently a single-pass heuristic scorer rather than a bounded file-reading agent with a scout phase and explicit default evidence recommendations.
+The desired architectural end state (deterministic scout, bounded model-driven agent, structural-only artifact, retriever-authored default evidence plan, narrow overrides) is now in place — see §3.4. What remains is the **regex-based symbol extraction** in `/Users/russfugal/code/sks/piorx/src/retriever/symbol-extractor.ts`, which is still the weakest link in span quality.
 
-The desired end state is:
+Upgrading to tree-sitter or ts-morph would directly sharpen:
 
-- deterministic scout for candidate narrowing
-- model-guided file reading inside the retriever boundary
-- strong per-file and per-symbol rationale
-- a retrieval artifact the conductor can trust as the default evidence recommendation
-- a narrow override path for conductor edge cases
+- per-symbol line range accuracy (regex currently overshoots for class bodies with nested methods);
+- the `selected_by_default` signal the retriever agent relies on when deciding whether to mark a symbol for a default span;
+- the `default_neighbor_lines` heuristic, which is currently driven by rough line-count math rather than block structure.
 
-Once that architecture exists, upgrading symbol extraction to tree-sitter or ts-morph remains a high-value improvement because it directly sharpens span selection and evidence quality.
+This is pure quality uplift — it doesn't change the contracts in §3.4 or the override surface in §3.4.1.
 
 ### 3.8 Token-budget heuristic
 
@@ -216,4 +214,4 @@ The six duplicative markdowns still at `/Users/russfugal/code/sks/pi/` (`README_
 
 ## 4. One-paragraph summary
 
-Pi-orchestra (`/Users/russfugal/code/sks/piorx/`) is a full reimplementation, not a refinement, of the batch-processing prototype at `/Users/russfugal/code/sks/pi/slow-cheap-extensions.ts`. The prototype's single feature — `@anthropic-ai/sdk` batch API integration with four slash commands and three LLM tools — was dropped entirely; what replaced it is a six-stage conductor workflow with typed artifacts, deterministic evidence assembly, hard conductor/retriever/assembler boundaries, immutable artifacts with lineage, and 376 passing tests. The revised roadmap is now clear: let the conductor read only user-supplied files embedded in the initial intent before restatement; refactor retrieval into a deterministic scout plus a bounded, model-driven file-reading retriever agent; keep the stored retrieval artifact structural-only; and make that artifact the retriever-authored default evidence recommendation that the conductor can usually trust, while still allowing narrow override hooks for edge cases. Because nothing has shipped yet, these contract changes should be made directly to the existing v1 specs rather than versioned forward prematurely. The biggest remaining product gaps are still the stubbed synthesis and execution workers, but retrieval and evidence planning are now also slated for a substantial redesign in favor of a more agentic, better-scoped pipeline.
+Pi-orchestra (`/Users/russfugal/code/sks/piorx/`) is a full reimplementation, not a refinement, of the batch-processing prototype at `/Users/russfugal/code/sks/pi/slow-cheap-extensions.ts`. The prototype's single feature — `@anthropic-ai/sdk` batch API integration with four slash commands and three LLM tools — was dropped entirely; what replaced it is a six-stage conductor workflow with typed artifacts, deterministic evidence assembly, hard conductor/retriever/assembler boundaries, immutable artifacts with lineage, and 498 passing tests. The agentic-retrieval redesign (AR-P1 … AR-P8, April 2026) has now landed: Stage 1 reads `<file>` blocks embedded in the initial intent via a bounded helper and persists them as `intent_file_refs` + `cleaned_user_intent`; retrieval is a deterministic scout (curated terms weighted by provenance, ≤8 selected + ≤4 reserve) followed by a bounded model-driven agent (≤3 rounds, ≤4 actions/round, ≤12 file reads, 256 KiB observation budget, repo-root-sandboxed executors, five enumerated `stopReason` values with scout-synthesized fallback); `retrieval-index-v1` stays structural-only but now carries `strategy_summary`, `scout_terms`, per-file `selection_tier` / `default_evidence_mode`, per-symbol `selected_by_default` / `default_neighbor_lines`, and a full retriever-authored `recommended_evidence` block that `createRecommendedEvidencePlan` copies directly into `evidence-plan-v1`; and the conductor may patch that default through a narrow, deterministic `applyEvidenceOverrides` API (nine validated ops) whose semantics are reconciled with the assembler — `promote_file mode='spans'` seeds spans from retrieval metadata or throws, and `set_file_mode` clears stale spans on `summary`/`summary+ast` and splices files out on `exclude`. v1 specs were edited in place rather than versioned forward. The biggest remaining product gaps are still the stubbed synthesis and execution workers (§3.3) and regex-based symbol extraction (§3.7); the retrieval and evidence-planning pipeline they sit on top of is no longer a known weak spot.
