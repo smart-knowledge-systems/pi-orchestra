@@ -69,8 +69,27 @@ describe('schema validation — invalid shapes', () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain('user_intent_verbatim must be a string');
+    expect(result.errors).toContain('cleaned_user_intent must be a string');
     expect(result.errors).toContain('tagged_files must be an array');
     expect(result.errors).toContain('timestamp must be a string');
+  });
+
+  it('rejects intent-capture-v1 with bad intent_file_refs entries', () => {
+    const result = validateArtifact({
+      artifact_type: 'intent-capture-v1',
+      artifact_id: 'test',
+      user_intent_verbatim: 'x',
+      cleaned_user_intent: 'x',
+      tagged_files: [],
+      timestamp: '2026-04-17T00:00:00Z',
+      intent_file_refs: [
+        { path: 'a', source: 'bogus' },
+        { path: 123, source: 'inline' },
+      ],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('intent_file_refs[0].source'))).toBe(true);
+    expect(result.errors).toContain('intent_file_refs[1].path must be a string');
   });
 
   it('rejects intent-restatement-v1 with wrong field types', () => {
@@ -126,13 +145,153 @@ describe('schema validation — invalid shapes', () => {
       intent_spec_id: 42, // should be string or null
       query: 'q',
       confidence: 'high',
+      strategy_summary: 's',
+      scout_terms: [],
+      files: [],
+      cross_file_findings: [],
+      gaps: [],
+      followup_queries: [],
+      recommended_evidence: {
+        files: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+      },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('intent_spec_id must be a string or null');
+  });
+
+  it('rejects retrieval-index-v1 missing strategy metadata and recommended_evidence', () => {
+    const result = validateArtifact({
+      artifact_type: 'retrieval-index-v1',
+      artifact_id: 'test',
+      intent_capture_id: 'x',
+      intent_restatement_id: 'x',
+      intent_spec_id: null,
+      query: 'q',
+      confidence: 'high',
       files: [],
       cross_file_findings: [],
       gaps: [],
       followup_queries: [],
     });
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('intent_spec_id must be a string or null');
+    expect(result.errors).toContain('strategy_summary must be a string');
+    expect(result.errors).toContain('scout_terms must be an array');
+    expect(result.errors).toContain('recommended_evidence must be an object');
+  });
+
+  it('rejects retrieval-index-v1 file with invalid selection_tier and default_evidence_mode', () => {
+    const result = validateArtifact({
+      artifact_type: 'retrieval-index-v1',
+      artifact_id: 'test',
+      intent_capture_id: 'x',
+      intent_restatement_id: 'x',
+      intent_spec_id: null,
+      query: 'q',
+      confidence: 'high',
+      strategy_summary: 's',
+      scout_terms: [],
+      files: [
+        {
+          file_id: 'f1',
+          path: '/abs/x.ts',
+          why_relevant: 'y',
+          file_summary: 'z',
+          ast_skeleton: [],
+          recommended_expansion: 'none',
+          expansion_reason: '',
+          selection_tier: 'maybe',
+          selection_reason: '',
+          default_evidence_mode: 'nope',
+          symbols: [
+            {
+              symbol_id: 's1',
+              kind: 'function',
+              name: 'foo',
+              start: 1,
+              count: 1,
+              summary: '',
+              role_in_system: '',
+              depends_on: [],
+              used_by: [],
+              relevance: 'high',
+              change_likelihood: 'low',
+              expansion_priority: 'medium',
+              recommended_expansion: 'none',
+              expansion_reason: '',
+              selected_by_default: 'yes',
+              default_neighbor_lines: '4',
+              selection_reason: 42,
+            },
+          ],
+        },
+      ],
+      cross_file_findings: [],
+      gaps: [],
+      followup_queries: [],
+      recommended_evidence: {
+        files: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+      },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('files[0].selection_tier'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('files[0].default_evidence_mode'))).toBe(true);
+    expect(result.errors).toContain('files[0].symbols[0].selected_by_default must be a boolean');
+    expect(result.errors).toContain('files[0].symbols[0].default_neighbor_lines must be a number');
+    expect(result.errors).toContain('files[0].symbols[0].selection_reason must be a string');
+  });
+
+  it('rejects retrieval-index-v1 with malformed recommended_evidence spans', () => {
+    const result = validateArtifact({
+      artifact_type: 'retrieval-index-v1',
+      artifact_id: 'test',
+      intent_capture_id: 'x',
+      intent_restatement_id: 'x',
+      intent_spec_id: null,
+      query: 'q',
+      confidence: 'high',
+      strategy_summary: 's',
+      scout_terms: [],
+      files: [],
+      cross_file_findings: [],
+      gaps: [],
+      followup_queries: [],
+      recommended_evidence: {
+        files: [
+          {
+            file_id: 'f1',
+            include_ast_skeleton: true,
+            include_retriever_summary: true,
+            include_entire_file: false,
+            spans: [
+              {
+                symbol_id: 's1',
+                include_span: 'yes',
+                neighbor_lines: 'four',
+              },
+            ],
+          },
+        ],
+        include_cross_file_findings: 'no',
+        include_gaps: false,
+        include_followup_queries: false,
+      },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      'recommended_evidence.files[0].spans[0].include_span must be a boolean',
+    );
+    expect(result.errors).toContain(
+      'recommended_evidence.files[0].spans[0].neighbor_lines must be a number',
+    );
+    expect(result.errors).toContain(
+      'recommended_evidence.include_cross_file_findings must be a boolean',
+    );
   });
 
   it('rejects evidence-plan-v1 with wrong retrieval_index.artifact_type', () => {
