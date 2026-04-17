@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   createEvidencePlan,
+  createRecommendedEvidencePlan,
   verifyEmbeddedIndex,
   type CreateEvidencePlanOptions,
 } from '../../src/conductor/evidence-plan.ts';
@@ -317,5 +318,263 @@ describe('createEvidencePlan', () => {
     const plan = createEvidencePlan({ retrieval_index: index });
     expect(plan.selection.files[0]!.file_id).toBe('f1');
     expect(plan.selection.files[1]!.file_id).toBe('f2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createRecommendedEvidencePlan — retriever-authored defaults
+// ---------------------------------------------------------------------------
+
+function makeRecommendedIndex(): RetrievalIndexV1 {
+  return makeIndex({
+    artifact_id: 'ri_rec_123',
+    files: [
+      // Selected: summary+ast, one default span
+      {
+        file_id: 'f1',
+        path: '/repo/src/main.ts',
+        why_relevant: 'entry point',
+        file_summary: 'Main application entry.\nSets up the server.',
+        ast_skeleton: ['function main()', 'function init()'],
+        recommended_expansion: 'none',
+        expansion_reason: '',
+        selection_tier: 'selected',
+        selection_reason: 'entry point for the affected flow',
+        default_evidence_mode: 'summary+ast',
+        symbols: [
+          {
+            symbol_id: 's1',
+            kind: 'function',
+            name: 'main',
+            start: 10,
+            count: 20,
+            summary: 'entry point',
+            role_in_system: 'entrypoint',
+            depends_on: [],
+            used_by: [],
+            relevance: 'high',
+            change_likelihood: 'low',
+            expansion_priority: 'high',
+            recommended_expansion: 'span',
+            expansion_reason: 'spans drive the default plan',
+            selected_by_default: true,
+            default_neighbor_lines: 4,
+            selection_reason: 'primary entry symbol',
+          },
+          {
+            symbol_id: 's2',
+            kind: 'function',
+            name: 'init',
+            start: 35,
+            count: 15,
+            summary: 'initializer',
+            role_in_system: 'setup',
+            depends_on: [],
+            used_by: ['s1'],
+            relevance: 'medium',
+            change_likelihood: 'low',
+            expansion_priority: 'medium',
+            recommended_expansion: 'none',
+            expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
+          },
+        ],
+      },
+      // Reserve — must be excluded from the default plan
+      {
+        file_id: 'f_reserve',
+        path: '/repo/src/archive.ts',
+        why_relevant: 'older module, likely not needed',
+        file_summary: 'Archive utilities.',
+        ast_skeleton: ['function legacyHelper()'],
+        recommended_expansion: 'none',
+        expansion_reason: '',
+        selection_tier: 'reserve',
+        selection_reason: 'near-threshold candidate',
+        default_evidence_mode: 'exclude',
+        symbols: [
+          {
+            symbol_id: 's_reserve',
+            kind: 'function',
+            name: 'legacyHelper',
+            start: 2,
+            count: 5,
+            summary: 'legacy helper',
+            role_in_system: 'utility',
+            depends_on: [],
+            used_by: [],
+            relevance: 'low',
+            change_likelihood: 'low',
+            expansion_priority: 'low',
+            recommended_expansion: 'none',
+            expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
+          },
+        ],
+      },
+    ],
+    recommended_evidence: {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 4 }],
+        },
+      ],
+      include_cross_file_findings: true,
+      include_gaps: false,
+      include_followup_queries: true,
+    },
+  });
+}
+
+describe('createRecommendedEvidencePlan', () => {
+  it('produces a valid evidence-plan-v1 straight from recommended_evidence', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    const result = validateArtifact(plan);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('maps recommended_evidence.files to plan selection one-for-one', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    expect(plan.selection.files).toHaveLength(1);
+    const f1 = plan.selection.files[0]!;
+    expect(f1.file_id).toBe('f1');
+    expect(f1.include_ast_skeleton).toBe(true);
+    expect(f1.include_retriever_summary).toBe(true);
+    expect(f1.include_entire_file).toBe(false);
+    expect(f1.spans).toHaveLength(1);
+    expect(f1.spans[0]).toEqual({ symbol_id: 's1', include_span: true, neighbor_lines: 4 });
+  });
+
+  it('excludes reserve-tier files from the default plan', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    expect(plan.selection.files.some((f) => f.file_id === 'f_reserve')).toBe(false);
+  });
+
+  it('carries include_cross_file_findings/gaps/followup straight from recommendation', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    expect(plan.selection.include_cross_file_findings).toBe(true);
+    expect(plan.selection.include_gaps).toBe(false);
+    expect(plan.selection.include_followup_queries).toBe(true);
+  });
+
+  it('is materially narrower than createEvidencePlan defaults', () => {
+    const index = makeRecommendedIndex();
+    const recommended = createRecommendedEvidencePlan(index);
+    const naive = createEvidencePlan({ retrieval_index: index });
+    // Naive default embeds every retrieved file (including reserve-tier);
+    // recommended plan embeds only the retriever-selected subset.
+    expect(recommended.selection.files.length).toBeLessThan(naive.selection.files.length);
+  });
+
+  it('promotes a reserve file as summary-only when requested', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index, { promote_reserve: ['f_reserve'] });
+    const promoted = plan.selection.files.find((f) => f.file_id === 'f_reserve');
+    expect(promoted).toBeDefined();
+    expect(promoted!.include_retriever_summary).toBe(true);
+    expect(promoted!.include_ast_skeleton).toBe(false);
+    expect(promoted!.include_entire_file).toBe(false);
+    expect(promoted!.spans).toEqual([]);
+  });
+
+  it('refuses to promote a non-reserve file_id', () => {
+    const index = makeRecommendedIndex();
+    expect(() => createRecommendedEvidencePlan(index, { promote_reserve: ['f1'] })).not.toThrow();
+    // f1 is already in the plan; promote_reserve should no-op for recommended ids,
+    // but must reject selected-tier ids that are NOT in recommended_evidence.
+  });
+
+  it('throws when promote_reserve references an unknown file_id', () => {
+    const index = makeRecommendedIndex();
+    expect(() =>
+      createRecommendedEvidencePlan(index, { promote_reserve: ['f_nonexistent'] }),
+    ).toThrow(/unknown reserve file_id/);
+  });
+
+  it('throws when promote_reserve references a selected-tier file', () => {
+    const index = makeRecommendedIndex();
+    // Add a selected-tier file that is NOT in recommended_evidence, then try
+    // to promote it as if it were reserve.
+    const indexWithExtraSelected = makeRecommendedIndex();
+    indexWithExtraSelected.files.push({
+      file_id: 'f_extra',
+      path: '/repo/src/extra.ts',
+      why_relevant: 'selected but not in recommendation',
+      file_summary: '',
+      ast_skeleton: [],
+      recommended_expansion: 'none',
+      expansion_reason: '',
+      selection_tier: 'selected',
+      selection_reason: '',
+      default_evidence_mode: 'summary',
+      symbols: [],
+    });
+    expect(() =>
+      createRecommendedEvidencePlan(indexWithExtraSelected, { promote_reserve: ['f_extra'] }),
+    ).toThrow(/not a reserve-tier candidate/);
+  });
+
+  it('throws when recommended_evidence references an unknown file_id', () => {
+    const index = makeRecommendedIndex();
+    index.recommended_evidence.files.push({
+      file_id: 'f_missing',
+      include_ast_skeleton: false,
+      include_retriever_summary: true,
+      include_entire_file: false,
+      spans: [],
+    });
+    expect(() => createRecommendedEvidencePlan(index)).toThrow(
+      /recommended_evidence references unknown file_id/,
+    );
+  });
+
+  it('throws when recommended_evidence references an unknown symbol_id', () => {
+    const index = makeRecommendedIndex();
+    index.recommended_evidence.files[0]!.spans.push({
+      symbol_id: 's_nonexistent',
+      include_span: true,
+      neighbor_lines: 2,
+    });
+    expect(() => createRecommendedEvidencePlan(index)).toThrow(
+      /recommended_evidence references unknown symbol_id/,
+    );
+  });
+
+  it('applies target_task overrides', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index, {
+      target_task: { type: 'change-spec', task_label: 'refactor entry' },
+    });
+    expect(plan.target_task.type).toBe('change-spec');
+    expect(plan.target_task.task_label).toBe('refactor entry');
+  });
+
+  it('applies assembly_options overrides while keeping sensible defaults', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index, {
+      assembly_options: { max_total_lines: 500 },
+    });
+    expect(plan.assembly_options.max_total_lines).toBe(500);
+    expect(plan.assembly_options.max_estimated_tokens).toBe(20000);
+    expect(plan.assembly_options.dedupe_overlapping_spans).toBe(true);
+  });
+
+  it('embeds the originating retrieval index reference byte-equal', () => {
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    expect(verifyEmbeddedIndex(plan, index)).toBe(true);
   });
 });

@@ -318,7 +318,7 @@
       "deliverable": "Extension evidence stage driven by retriever-authored default scope",
       "files": ["extensions/conductor-extension.ts", "src/conductor/evidence-plan.ts"],
       "dependencies": ["AR-P6-T1", "AR-P5-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "The default evidence stage path uses retriever recommendations rather than conductor heuristics",
         "Evidence preview shows a materially narrower plan by default",
@@ -340,7 +340,7 @@
         "tests/assembler/evidence-assembler.test.ts"
       ],
       "dependencies": ["AR-P6-T1", "AR-P6-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Budget estimates align with recommended evidence scope rather than summary-for-all defaults",
         "Evidence-plan tests assert the mapping from retrieval recommendations to plan selections",

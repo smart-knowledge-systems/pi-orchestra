@@ -9,6 +9,7 @@ import {
 import { ArtifactStore } from '../../src/artifacts/store.ts';
 import { createConfig } from '../../src/runtime/config.ts';
 import { validateArtifact } from '../../src/artifacts/schemas.ts';
+import { createRecommendedEvidencePlan } from '../../src/conductor/evidence-plan.ts';
 import type {
   RetrievalIndexV1,
   EvidencePlanV1,
@@ -647,5 +648,53 @@ describe('evidence assembler — materialize mode', () => {
     expect(bundle!.stats.full_files).toBe(0);
     expect(bundle!.stats.total_lines).toBeGreaterThan(0);
     expect(bundle!.stats.estimated_tokens).toBeGreaterThan(0);
+  });
+
+  it('materializes a retriever-authored default plan from createRecommendedEvidencePlan', async () => {
+    await setupRepoFiles();
+    const index = makeIndex();
+    // Put f2 into reserve so summary-for-all would include it but the
+    // recommendation-derived plan should not.
+    index.files[1]!.selection_tier = 'reserve';
+    index.files[1]!.default_evidence_mode = 'exclude';
+    // f1 is the only recommended file, with one selected symbol span.
+    index.recommended_evidence = {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 1 }],
+        },
+      ],
+      include_cross_file_findings: true,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+    index.files[0]!.symbols[0]!.selected_by_default = true;
+    index.files[0]!.symbols[0]!.default_neighbor_lines = 1;
+
+    const plan = createRecommendedEvidencePlan(index);
+    await seedArtifacts(index, plan);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+
+    expect(result.status).toBe('success');
+    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    expect(bundle).not.toBeNull();
+    // Reserve file must not appear in the materialized bundle.
+    expect(bundle!.structural_context.files).toHaveLength(1);
+    expect(bundle!.structural_context.files[0]!.path).toContain('main.ts');
+    for (const ev of bundle!.raw_evidence) {
+      expect(ev.path).toContain('main.ts');
+    }
   });
 });

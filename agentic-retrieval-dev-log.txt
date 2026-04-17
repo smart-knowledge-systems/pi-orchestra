@@ -244,3 +244,39 @@ All three active tasks are complete. Verified with `bunx tsc --noEmit` (clean) a
 **Files modified**: `src/services/artifact-inspect.ts`, `src/conductor/evidence-plan.ts`, `extensions/conductor-extension.ts`, `tests/fixtures/sample-artifacts/retrieval-index-v1.json`, `tests/retriever/normalize.test.ts`, `tests/conductor/retrieval-stage.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
 
 **Not done (by design)**: AR-P6-T2 (wiring the new helper into the extension evidence stage), AR-P6-T3, and AR-P7-* remain `planned`. The extension still uses the legacy `createDefaultEvidencePlan` / `createEvidencePlan` summary+first-two-spans heuristic until AR-P6-T2.
+
+===== 2026-04-17 | opus implement AR-P6-T2 + AR-P6-T3 =====
+Both active Sprint 6 tasks complete.
+
+**AR-P6-T2 — extension uses retriever-authored default plan**
+- `extensions/conductor-extension.ts`: swapped the naive summary+first-two-spans `createDefaultEvidencePlan` body for a call to `createRecommendedEvidencePlan(index, { target_task })`. The function name is preserved so the Stage 4 flow (build plan → store → notify → preview → confirm → materialize) stays intact. Import swapped from `createEvidencePlan` to `createRecommendedEvidencePlan`.
+- `summarizeEvidencePlan` rewritten to show: "Retriever-authored default plan (narrowed from N retrieved, R held as reserve)", per-file `[default_evidence_mode] — whole/ast/summary/spans=N` (or "exclude"), and the three top-level include flags. Conductor inspection of the plan before materialization is unchanged.
+
+**AR-P6-T3 — budget helper + test alignment**
+- `src/util/budget.ts`: added `estimateRecommendedBudget(index, assembly_options?)` that constructs a synthetic EvidencePlanV1 mirroring the retriever-authored default scope (copies `recommended_evidence.files` + the three include flags, clamps `neighbor_lines` to non-negative integers, uses sane DEFAULT_ASSEMBLY_OPTIONS_FOR_RECOMMENDATION) and delegates to `estimateBudget`. Pure util — no import from `src/conductor/`.
+- `tests/assembler/evidence-plan.test.ts`: added `createRecommendedEvidencePlan` suite (13 tests) covering: recommendation→plan mapping (include flags + span + neighbor_lines), reserve-tier exclusion, include_cross_file/gaps/followup passthrough, narrowness vs `createEvidencePlan`, reserve promotion (happy path + no-op for already-recommended id), validation failures (unknown promoted id, non-reserve promoted id, unknown recommended file_id, unknown recommended symbol_id), target_task/assembly_options overrides, and embedded-index byte-equality.
+- `tests/assembler/budget.test.ts`: new `estimateRecommendedBudget` suite (5 tests): recommendation-derived scope (includes only f1 with skeleton=3 + summary + span=24 lines for s1 with neighbor=2), narrower than the legacy summary-for-all plan (fewer files, fewer lines/tokens), assembly_options overrides respected, determinism, and empty-recommendation → zero-lines.
+- `tests/assembler/evidence-assembler.test.ts`: added end-to-end test that marks f2 reserve/exclude, populates recommended_evidence with f1 + one default span (neighbor=1), calls `createRecommendedEvidencePlan`, and verifies the materialized bundle contains exactly `main.ts` in both structural context and raw evidence — reserve file never appears.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 432 pass / 0 fail (up from 412 — 20 net new tests).
+
+**Files modified**: `extensions/conductor-extension.ts`, `src/util/budget.ts`, `tests/assembler/evidence-plan.test.ts`, `tests/assembler/budget.test.ts`, `tests/assembler/evidence-assembler.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+**Not done (by design)**: AR-P7-* (narrow override API) and AR-P8-* (docs + end-to-end regression) remain `planned` — out of active-task scope.
+
+===== 2026-04-17T22:09:04Z | opus implement =====
+Both active Sprint 6 tasks are done. `bunx tsc --noEmit` clean; `bun test` 432 pass / 0 fail (up from 412).
+
+**AR-P6-T2 — extension uses retriever-authored default plan**
+- `extensions/conductor-extension.ts:397`: `createDefaultEvidencePlan` now calls `createRecommendedEvidencePlan(index, { target_task })` — naive summary+first-two-spans heuristic gone. Function name preserved so Stage 4 flow is unchanged.
+- `summarizeEvidencePlan` rewritten to show "narrowed from N retrieved, R held as reserve", per-file `[mode] — whole/ast/summary/spans=N` lines, and the three include flags. Conductor still inspects the plan between creation and materialization.
+
+**AR-P6-T3 — budget helper + test alignment**
+- `src/util/budget.ts`: added `estimateRecommendedBudget(index, assembly_options?)` that builds a synthetic plan from `recommended_evidence` and delegates to `estimateBudget`.
+- `tests/assembler/evidence-plan.test.ts`: +13 tests covering `createRecommendedEvidencePlan` (mapping, reserve exclusion, promotion, validation failures, overrides).
+- `tests/assembler/budget.test.ts`: +5 tests for `estimateRecommendedBudget` (narrower than summary-for-all, determinism, empty-recommendation).
+- `tests/assembler/evidence-assembler.test.ts`: +1 end-to-end test confirming a materialized recommendation-derived bundle excludes the reserve file.
+
+**Files modified**: `extensions/conductor-extension.ts`, `src/util/budget.ts`, `tests/assembler/evidence-plan.test.ts`, `tests/assembler/budget.test.ts`, `tests/assembler/evidence-assembler.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+No unfinished work in scope. AR-P7-* and AR-P8-* remain `planned`.

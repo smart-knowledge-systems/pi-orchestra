@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { estimateBudget, estimateTokensFromLines, checkBudget } from '../../src/util/budget.ts';
+import {
+  estimateBudget,
+  estimateRecommendedBudget,
+  estimateTokensFromLines,
+  checkBudget,
+} from '../../src/util/budget.ts';
 import { SpanResolutionError } from '../../src/util/spans.ts';
 import { evidenceAssemble } from '../../src/services/evidence-assembler.ts';
 import { ArtifactStore } from '../../src/artifacts/store.ts';
@@ -444,6 +449,123 @@ describe('estimateBudget', () => {
 // ---------------------------------------------------------------------------
 // checkBudget
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// estimateRecommendedBudget — retriever-authored default scope
+// ---------------------------------------------------------------------------
+
+describe('estimateRecommendedBudget', () => {
+  function makeNarrowRecommendationIndex(): RetrievalIndexV1 {
+    const base = makeIndex();
+    // Mark f2 as reserve so summary-for-all would include it but the
+    // retriever-authored default would not.
+    base.files[1]!.selection_tier = 'reserve';
+    base.files[1]!.default_evidence_mode = 'exclude';
+    base.recommended_evidence = {
+      files: [
+        {
+          file_id: 'f1',
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: [{ symbol_id: 's1', include_span: true, neighbor_lines: 2 }],
+        },
+      ],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    };
+    return base;
+  }
+
+  it('uses recommended_evidence.files and the recommended include flags', () => {
+    const index = makeNarrowRecommendationIndex();
+    const est = estimateRecommendedBudget(index);
+    expect(est.file_estimates).toHaveLength(1);
+    expect(est.file_estimates[0]!.file_id).toBe('f1');
+    // Summary + ast skeleton plus expanded span
+    expect(est.file_estimates[0]!.summary_lines).toBeGreaterThan(0);
+    expect(est.file_estimates[0]!.skeleton_lines).toBe(3);
+    // s1 spans lines 10..29 (20 lines); neighbor_lines=2 expands to 8..31 = 24 lines.
+    expect(est.file_estimates[0]!.span_lines).toBe(24);
+    // Cross-file/gaps/followup are off by recommendation
+    expect(est.cross_file_lines).toBe(0);
+    expect(est.gaps_lines).toBe(0);
+    expect(est.followup_lines).toBe(0);
+  });
+
+  it('is materially narrower than a summary-for-all default across all retrieved files', () => {
+    const index = makeNarrowRecommendationIndex();
+
+    // Simulate the legacy summary-for-all default: every retrieved file gets
+    // summary + ast skeleton + first-two-symbol spans.
+    const legacyPlan: EvidencePlanV1 = {
+      artifact_type: 'evidence-plan-v1',
+      artifact_id: 'plan_legacy',
+      retrieval_index: {
+        artifact_type: 'retrieval-index-v1',
+        artifact_id: index.artifact_id,
+      },
+      selection: {
+        files: index.files.map((file) => ({
+          file_id: file.file_id,
+          include_ast_skeleton: true,
+          include_retriever_summary: true,
+          include_entire_file: false,
+          spans: file.symbols.slice(0, 2).map((symbol) => ({
+            symbol_id: symbol.symbol_id,
+            include_span: true,
+            neighbor_lines: 3,
+          })),
+        })),
+        include_cross_file_findings: true,
+        include_gaps: true,
+        include_followup_queries: true,
+      },
+      assembly_options: {
+        max_total_lines: 2000,
+        max_estimated_tokens: 20000,
+        dedupe_overlapping_spans: true,
+        span_merge_strategy: 'merge_if_overlapping',
+      },
+      prompt_sections: {
+        include_intent_context: true,
+        include_structural_context: true,
+        include_raw_evidence: true,
+      },
+      target_task: { type: 'analysis-report', task_label: 'legacy' },
+    };
+    const legacy = estimateBudget(legacyPlan, index);
+    const recommended = estimateRecommendedBudget(index);
+
+    expect(recommended.total_lines).toBeLessThan(legacy.total_lines);
+    expect(recommended.estimated_tokens).toBeLessThan(legacy.estimated_tokens);
+    expect(recommended.file_estimates.length).toBeLessThan(legacy.file_estimates.length);
+  });
+
+  it('respects assembly_options overrides', () => {
+    const index = makeNarrowRecommendationIndex();
+    const est = estimateRecommendedBudget(index, { max_total_lines: 42 });
+    // The helper uses the provided overrides inside the synthetic plan; total
+    // lines still reflect the recommendation scope, not the override.
+    expect(est.total_lines).toBeGreaterThan(0);
+    expect(est.total_lines).not.toBe(42);
+  });
+
+  it('is deterministic across calls', () => {
+    const index = makeNarrowRecommendationIndex();
+    const e1 = estimateRecommendedBudget(index);
+    const e2 = estimateRecommendedBudget(index);
+    expect(e1).toEqual(e2);
+  });
+
+  it('returns zero lines for an empty recommended_evidence', () => {
+    const index = makeIndex(); // empty recommended_evidence by default
+    const est = estimateRecommendedBudget(index);
+    expect(est.total_lines).toBe(0);
+    expect(est.file_estimates).toHaveLength(0);
+  });
+});
 
 describe('checkBudget', () => {
   const index = makeIndex();

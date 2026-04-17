@@ -8,6 +8,7 @@
 import type {
   EvidencePlanV1,
   EvidencePlanFile,
+  AssemblyOptions,
   RetrievalIndexV1,
   RetrievalFile,
 } from '../artifacts/types.ts';
@@ -221,4 +222,72 @@ export function checkBudget(plan: EvidencePlanV1, index: RetrievalIndexV1): Budg
     estimate,
     over_budget_reasons: reasons,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Retriever-authored default scope estimation
+// ---------------------------------------------------------------------------
+
+const DEFAULT_ASSEMBLY_OPTIONS_FOR_RECOMMENDATION: AssemblyOptions = {
+  max_total_lines: 2000,
+  max_estimated_tokens: 20000,
+  dedupe_overlapping_spans: true,
+  span_merge_strategy: 'merge_if_overlapping',
+};
+
+/**
+ * Estimate the budget for the retriever-authored default evidence scope
+ * embedded in a retrieval-index-v1.
+ *
+ * Mirrors `createRecommendedEvidencePlan`'s scope selection without going
+ * through the conductor plan helper: reserve-tier files are excluded, per-file
+ * include flags and per-symbol neighbor_lines come straight from
+ * `recommended_evidence`, and cross-file/gap/followup inclusion flags are
+ * taken from the retriever's recommendation. This gives budget-aware callers
+ * (previews, conductor summaries) a number grounded in the narrower default
+ * scope rather than the old summary-for-all heuristic.
+ */
+export function estimateRecommendedBudget(
+  index: RetrievalIndexV1,
+  assembly_options?: Partial<AssemblyOptions>,
+): BudgetEstimate {
+  const recommended = index.recommended_evidence;
+  const planFiles: EvidencePlanFile[] = recommended.files.map((rec) => ({
+    file_id: rec.file_id,
+    include_ast_skeleton: rec.include_ast_skeleton,
+    include_retriever_summary: rec.include_retriever_summary,
+    include_entire_file: rec.include_entire_file,
+    spans: rec.spans.map((span) => ({
+      symbol_id: span.symbol_id,
+      include_span: span.include_span,
+      neighbor_lines: Math.max(0, Math.floor(span.neighbor_lines)),
+    })),
+  }));
+
+  const syntheticPlan: EvidencePlanV1 = {
+    artifact_type: 'evidence-plan-v1',
+    artifact_id: 'plan_recommended_preview',
+    retrieval_index: {
+      artifact_type: 'retrieval-index-v1',
+      artifact_id: index.artifact_id,
+    },
+    selection: {
+      files: planFiles,
+      include_cross_file_findings: recommended.include_cross_file_findings,
+      include_gaps: recommended.include_gaps,
+      include_followup_queries: recommended.include_followup_queries,
+    },
+    assembly_options: {
+      ...DEFAULT_ASSEMBLY_OPTIONS_FOR_RECOMMENDATION,
+      ...assembly_options,
+    },
+    prompt_sections: {
+      include_intent_context: true,
+      include_structural_context: true,
+      include_raw_evidence: true,
+    },
+    target_task: { type: 'analysis-report', task_label: 'recommended-scope budget estimate' },
+  };
+
+  return estimateBudget(syntheticPlan, index);
 }

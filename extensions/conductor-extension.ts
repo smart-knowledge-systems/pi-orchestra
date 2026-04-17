@@ -24,7 +24,7 @@ import type {
   IntentRestatementV1,
   RetrievalIndexV1,
 } from '../src/artifacts/types.ts';
-import { createEvidencePlan } from '../src/conductor/evidence-plan.ts';
+import { createRecommendedEvidencePlan } from '../src/conductor/evidence-plan.ts';
 import { ExpansionController, type ExpansionReviewResponse } from '../src/conductor/expansion.ts';
 import {
   getPromotionPrompt,
@@ -205,14 +205,26 @@ function summarizeEvidencePlan(
   plan: ReturnType<typeof createDefaultEvidencePlan>,
   index: RetrievalIndexV1,
 ) {
-  const fileSummaries = plan.selection.files.slice(0, 5).map((file) => {
+  const reserveCount = index.files.filter((f) => f.selection_tier === 'reserve').length;
+  const fileSummaries = plan.selection.files.slice(0, 8).map((file) => {
     const match = index.files.find((candidate) => candidate.file_id === file.file_id);
-    return `${match?.path ?? file.file_id} — spans=${file.spans.length}, ast=${file.include_ast_skeleton ? 'yes' : 'no'}, summary=${file.include_retriever_summary ? 'yes' : 'no'}`;
+    const mode = match?.default_evidence_mode ?? 'summary';
+    const includedSpans = file.spans.filter((s) => s.include_span).length;
+    const flags = [
+      file.include_entire_file ? 'whole' : null,
+      file.include_ast_skeleton ? 'ast' : null,
+      file.include_retriever_summary ? 'summary' : null,
+      includedSpans > 0 ? `spans=${includedSpans}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    return `${match?.path ?? file.file_id} [${mode}] — ${flags || 'exclude'}`;
   });
 
   return [
-    `Files selected: ${plan.selection.files.length}`,
-    formatList('Planned evidence files', fileSummaries),
+    `Retriever-authored default plan (narrowed from ${index.files.length} retrieved, ${reserveCount} held as reserve)`,
+    `Files in plan: ${plan.selection.files.length}`,
+    formatList('Planned evidence files', fileSummaries, 8),
     `Include cross-file findings: ${plan.selection.include_cross_file_findings ? 'yes' : 'no'}`,
     `Include gaps: ${plan.selection.include_gaps ? 'yes' : 'no'}`,
     `Include follow-up queries: ${plan.selection.include_followup_queries ? 'yes' : 'no'}`,
@@ -395,22 +407,7 @@ function summarizeExpandedSpec(spec: ExpandedSpec): string {
 }
 
 function createDefaultEvidencePlan(index: RetrievalIndexV1) {
-  return createEvidencePlan({
-    retrieval_index: index,
-    file_controls: index.files.map((file) => ({
-      file_id: file.file_id,
-      include_ast_skeleton: true,
-      include_retriever_summary: true,
-      include_entire_file: false,
-      spans: file.symbols.slice(0, 2).map((symbol) => ({
-        symbol_id: symbol.symbol_id,
-        include_span: true,
-        neighbor_lines: 3,
-      })),
-    })),
-    include_cross_file_findings: true,
-    include_gaps: true,
-    include_followup_queries: true,
+  return createRecommendedEvidencePlan(index, {
     target_task: {
       type: 'analysis-report',
       task_label: 'analyze codebase or prepare a change plan',
