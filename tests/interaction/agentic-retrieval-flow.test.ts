@@ -39,6 +39,7 @@ import {
 } from '../../src/services/evidence-assembler.ts';
 import type { EvidenceBundleV1, RetrievalIndexV1 } from '../../src/artifacts/types.ts';
 import type { PiOrchestraConfig } from '../../src/runtime/config.ts';
+import type { AgentModelCallback } from '../../src/retriever/agent-types.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -312,6 +313,289 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     // the plan requested.
     for (const ev of bundle.raw_evidence) {
       expect(planPaths.has(ev.path)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent-driven dispatch — AR-P8-T3
+// ---------------------------------------------------------------------------
+
+describe('agentic retrieval flow — agent-driven retriever path', () => {
+  /**
+   * Write a handful of distractor files alongside the Stage 1 fixture so
+   * the scout's selected tier can plausibly hold more than one candidate.
+   * The stubbed agent will then narrow the recommendation back down to a
+   * single file, and the test asserts that narrowing survives the stored
+   * artifact and the recommended evidence plan.
+   */
+  async function writeDistractorFiles(repoRoot: string): Promise<void> {
+    const libDir = join(repoRoot, 'src/lib');
+    await mkdir(libDir, { recursive: true });
+    await writeFile(
+      join(libDir, 'session-store.ts'),
+      [
+        '// session-store.ts — unrelated helper referencing the same terms',
+        'export function saveSession(session: unknown): void {',
+        '  void session;',
+        '}',
+        '',
+        'export function findModel(): string {',
+        "  return 'noop';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    await writeFile(
+      join(libDir, 'model-config.ts'),
+      [
+        '// model-config.ts — looks relevant by name but is not the target',
+        "export const DEFAULT_MODEL = 'default-model';",
+        "export const FALLBACK_MODEL = 'fallback-model';",
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+  }
+
+  test('retrievalDispatch with a stubbed retrieverAgentModel narrows the plan to the agent recommendation', async () => {
+    const repoDir = join(tempDir, 'repo');
+    await writeDistractorFiles(repoDir);
+
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    // Scout-only baseline: no model callback means retrieval falls back to
+    // the deterministic scout output.
+    const scoutDispatch = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(scoutDispatch.status).toBe('success');
+    expect(scoutDispatch.message).not.toContain('agent rounds=');
+    const scoutIndex = (await store.get(
+      'retrieval-index-v1',
+      scoutDispatch.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+    const scoutPlan = createRecommendedEvidencePlan(scoutIndex);
+
+    // Agent-driven path: supply a stubbed model that returns a narrower
+    // single-file recommendation in the very first round.
+    const agentResponse = JSON.stringify({
+      status: 'stop',
+      summary: 'agent narrowed to the tagged file',
+      recommendation: {
+        strategy_summary:
+          'Agent confirmed src/core/model-resolver.ts defines restoreModelFromSession ' +
+          'and rejected src/lib/* candidates as unrelated.',
+        files: [
+          {
+            path: 'src/core/model-resolver.ts',
+            tier: 'selected',
+            default_evidence_mode: 'spans',
+            selection_reason: 'defines restoreModelFromSession',
+            include_ast_skeleton: true,
+            include_retriever_summary: true,
+            include_entire_file: false,
+            symbols: [
+              {
+                name: 'restoreModelFromSession',
+                start: 3,
+                count: 5,
+                selected_by_default: true,
+                default_neighbor_lines: 1,
+                selection_reason: 'primary target span',
+              },
+            ],
+          },
+        ],
+        cross_file_findings: [],
+        gaps: [],
+        followup_queries: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+        confidence: 'high',
+      },
+    });
+
+    const modelCalls: Array<{ round: number; systemPromptLen: number }> = [];
+    const retrieverAgentModel: AgentModelCallback = async ({ round, systemPrompt }) => {
+      modelCalls.push({ round, systemPromptLen: systemPrompt.length });
+      return agentResponse;
+    };
+
+    const agentDispatch = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+      { retrieverAgentModel },
+    );
+
+    expect(agentDispatch.status).toBe('success');
+    // Dispatch message carries agent telemetry, proving the model callback
+    // ran (scout-only dispatch has no such suffix).
+    expect(agentDispatch.message).toContain('agent rounds=1');
+    expect(agentDispatch.message).toContain('stop=agent_stopped');
+    expect(modelCalls.length).toBe(1);
+    expect(modelCalls[0]!.round).toBe(1);
+    expect(modelCalls[0]!.systemPromptLen).toBeGreaterThan(0);
+
+    const agentIndex = (await store.get(
+      'retrieval-index-v1',
+      agentDispatch.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+
+    // Stored artifact reflects the agent's narrower selection, not the
+    // scout's: exactly one selected file, exactly the tagged target.
+    const agentSelected = agentIndex.files.filter((f) => f.selection_tier === 'selected');
+    expect(agentSelected.length).toBe(1);
+    expect(agentSelected[0]!.path.endsWith('/src/core/model-resolver.ts')).toBe(true);
+    expect(agentSelected[0]!.default_evidence_mode).toBe('spans');
+    expect(agentSelected[0]!.selection_reason).toContain('restoreModelFromSession');
+    expect(agentIndex.strategy_summary).toContain('Agent confirmed');
+    expect(agentIndex.confidence).toBe('high');
+
+    // The distractor files must not be promoted into the selected tier on
+    // the agent-driven path. They may appear structurally (reserve or via
+    // scout-authored leftovers) but never as selected.
+    const selectedPaths = agentSelected.map((f) => f.path);
+    for (const p of selectedPaths) {
+      expect(p.endsWith('/src/lib/session-store.ts')).toBe(false);
+      expect(p.endsWith('/src/lib/model-config.ts')).toBe(false);
+    }
+
+    // Recommended evidence plan mirrors the agent's narrower scope: one
+    // file, one span, the agent-chosen neighbor_lines.
+    const agentPlan = createRecommendedEvidencePlan(agentIndex);
+    expect(agentPlan.selection.files.length).toBe(1);
+    const planFile = agentPlan.selection.files[0]!;
+    const planTargetId = agentSelected[0]!.file_id;
+    expect(planFile.file_id).toBe(planTargetId);
+    expect(planFile.include_ast_skeleton).toBe(true);
+    expect(planFile.include_retriever_summary).toBe(true);
+    expect(planFile.include_entire_file).toBe(false);
+    expect(planFile.spans.length).toBe(1);
+    expect(planFile.spans[0]!.include_span).toBe(true);
+    expect(planFile.spans[0]!.neighbor_lines).toBe(1);
+
+    // Agent-driven plan cannot be wider than scout-only plan. When scout
+    // chose more than one file, the agent-driven plan is strictly narrower.
+    expect(agentPlan.selection.files.length).toBeLessThanOrEqual(scoutPlan.selection.files.length);
+    if (scoutPlan.selection.files.length > 1) {
+      expect(agentPlan.selection.files.length).toBeLessThan(scoutPlan.selection.files.length);
+    }
+
+    // Structural-only guarantees must still hold: no raw bodies leak into
+    // the stored artifact even though the retrieval boundary now crossed a
+    // model round.
+    const serialized = JSON.stringify(agentIndex);
+    expect(serialized).not.toContain('raw_content');
+    expect(serialized).not.toContain("return 'default-model'");
+    expect(serialized).not.toContain("return 'fallback-model'");
+    expect(serialized).not.toContain('session !== null && typeof session');
+  });
+
+  test('agent-driven bundle materializes only the agent-selected evidence', async () => {
+    const repoDir = join(tempDir, 'repo');
+    await writeDistractorFiles(repoDir);
+
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    const agentResponse = JSON.stringify({
+      status: 'stop',
+      summary: 'narrowed',
+      recommendation: {
+        strategy_summary: 'Agent narrowed to tagged target only',
+        files: [
+          {
+            path: 'src/core/model-resolver.ts',
+            tier: 'selected',
+            default_evidence_mode: 'spans',
+            selection_reason: 'primary entry point',
+            include_ast_skeleton: true,
+            include_retriever_summary: true,
+            include_entire_file: false,
+            symbols: [
+              {
+                name: 'restoreModelFromSession',
+                start: 3,
+                count: 5,
+                selected_by_default: true,
+                default_neighbor_lines: 1,
+                selection_reason: 'agent-selected span',
+              },
+            ],
+          },
+        ],
+        cross_file_findings: [],
+        gaps: [],
+        followup_queries: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+        confidence: 'high',
+      },
+    });
+
+    const retrieverAgentModel: AgentModelCallback = async () => agentResponse;
+
+    const dispatchResult = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+      { retrieverAgentModel },
+    );
+    expect(dispatchResult.status).toBe('success');
+    const index = (await store.get(
+      'retrieval-index-v1',
+      dispatchResult.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+
+    const plan = createRecommendedEvidencePlan(index);
+    await store.put(plan);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    expect(result.status).toBe('success');
+
+    const bundle = (await store.get(
+      'evidence-bundle-v1',
+      result.evidence_bundle_id!,
+    )) as EvidenceBundleV1;
+
+    const bundlePaths = bundle.structural_context.files.map((f) => f.path);
+    expect(bundlePaths.length).toBe(1);
+    expect(bundlePaths[0]!.endsWith('/src/core/model-resolver.ts')).toBe(true);
+
+    // Distractors stay out of the materialized bundle on the agent path.
+    for (const p of bundlePaths) {
+      expect(p.endsWith('/src/lib/session-store.ts')).toBe(false);
+      expect(p.endsWith('/src/lib/model-config.ts')).toBe(false);
+    }
+    for (const ev of bundle.raw_evidence) {
+      expect(ev.path.endsWith('/src/core/model-resolver.ts')).toBe(true);
     }
   });
 });
