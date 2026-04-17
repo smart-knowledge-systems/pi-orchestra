@@ -25,6 +25,10 @@ import type {
   RetrievalIndexV1,
 } from '../src/artifacts/types.ts';
 import { createRecommendedEvidencePlan } from '../src/conductor/evidence-plan.ts';
+import {
+  applyEvidenceOverrides,
+  type EvidenceOverride,
+} from '../src/conductor/evidence-overrides.ts';
 import { ExpansionController, type ExpansionReviewResponse } from '../src/conductor/expansion.ts';
 import {
   getPromotionPrompt,
@@ -205,7 +209,8 @@ function summarizeEvidencePlan(
   plan: ReturnType<typeof createDefaultEvidencePlan>,
   index: RetrievalIndexV1,
 ) {
-  const reserveCount = index.files.filter((f) => f.selection_tier === 'reserve').length;
+  const reserveFiles = index.files.filter((f) => f.selection_tier === 'reserve');
+  const planFileIds = new Set(plan.selection.files.map((f) => f.file_id));
   const fileSummaries = plan.selection.files.slice(0, 8).map((file) => {
     const match = index.files.find((candidate) => candidate.file_id === file.file_id);
     const mode = match?.default_evidence_mode ?? 'summary';
@@ -221,14 +226,70 @@ function summarizeEvidencePlan(
     return `${match?.path ?? file.file_id} [${mode}] — ${flags || 'exclude'}`;
   });
 
+  const reserveLines = reserveFiles
+    .filter((f) => !planFileIds.has(f.file_id))
+    .slice(0, 5)
+    .map((f) => `${f.path} (${f.file_id}) — ${f.selection_reason || f.why_relevant}`);
+
   return [
-    `Retriever-authored default plan (narrowed from ${index.files.length} retrieved, ${reserveCount} held as reserve)`,
+    `Retriever-authored default plan (narrowed from ${index.files.length} retrieved, ${reserveFiles.length} held as reserve)`,
     `Files in plan: ${plan.selection.files.length}`,
-    formatList('Planned evidence files', fileSummaries, 8),
+    formatList('Selected files (in default plan)', fileSummaries, 8),
+    formatList('Reserve candidates (not in default plan)', reserveLines, 5),
     `Include cross-file findings: ${plan.selection.include_cross_file_findings ? 'yes' : 'no'}`,
     `Include gaps: ${plan.selection.include_gaps ? 'yes' : 'no'}`,
     `Include follow-up queries: ${plan.selection.include_followup_queries ? 'yes' : 'no'}`,
   ].join('\n\n');
+}
+
+const OVERRIDE_HELP = [
+  'Provide a JSON array of narrow override operations, or leave empty to keep retriever defaults.',
+  'Supported ops:',
+  '  { "op": "promote_file", "file_id": "...", "mode"?: "summary"|"summary+ast"|"spans"|"whole_file" }',
+  '  { "op": "demote_file", "file_id": "..." }',
+  '  { "op": "set_file_mode", "file_id": "...", "mode": "summary"|"summary+ast"|"spans"|"whole_file"|"exclude" }',
+  '  { "op": "include_symbol", "file_id": "...", "symbol_id": "...", "neighbor_lines"?: 0 }',
+  '  { "op": "exclude_symbol", "file_id": "...", "symbol_id": "..." }',
+  '  { "op": "set_neighbor_lines", "file_id": "...", "symbol_id": "...", "neighbor_lines": 3 }',
+  '  { "op": "toggle_cross_file_findings"|"toggle_gaps"|"toggle_followup_queries", "value": true|false }',
+].join('\n');
+
+const VALID_OVERRIDE_OPS = new Set([
+  'promote_file',
+  'demote_file',
+  'set_file_mode',
+  'include_symbol',
+  'exclude_symbol',
+  'set_neighbor_lines',
+  'toggle_cross_file_findings',
+  'toggle_gaps',
+  'toggle_followup_queries',
+]);
+
+function parseEvidenceOverridesInput(raw: string): EvidenceOverride[] {
+  const stripped = stripCodeFence(raw).trim();
+  if (!stripped) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripped);
+  } catch (error) {
+    throw new Error(
+      `Override input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('Override input must be a JSON array of operations');
+  }
+  return parsed.map((entry, idx) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`Override #${idx}: must be an object`);
+    }
+    const op = (entry as { op?: unknown }).op;
+    if (typeof op !== 'string' || !VALID_OVERRIDE_OPS.has(op)) {
+      throw new Error(`Override #${idx}: unknown op "${String(op)}"`);
+    }
+    return entry as EvidenceOverride;
+  });
 }
 
 function parseExpandedSpec(
@@ -685,11 +746,60 @@ async function runEvidenceStage(machine: StageMachine, ctx: ExtensionContext): P
     retrievalIndexId,
   );
 
-  const plan = createDefaultEvidencePlan(index);
-  await runtime.store.put(plan);
-  await machine.setArtifact('evidence_plan_id', plan.artifact_id);
-  await logEvent('stage4.plan_created', { evidencePlanId: plan.artifact_id, plan });
-  ctx.ui.notify(`Stage 4: evidence planning\n\n${summarizeEvidencePlan(plan, index)}`, 'info');
+  const defaultPlan = createDefaultEvidencePlan(index);
+  await runtime.store.put(defaultPlan);
+  await machine.setArtifact('evidence_plan_id', defaultPlan.artifact_id);
+  await logEvent('stage4.plan_created', {
+    evidencePlanId: defaultPlan.artifact_id,
+    plan: defaultPlan,
+  });
+  ctx.ui.notify(
+    `Stage 4: evidence planning\n\n${summarizeEvidencePlan(defaultPlan, index)}`,
+    'info',
+  );
+
+  let plan = defaultPlan;
+  const wantsOverrides = await ctx.ui.confirm(
+    'Conductor: apply narrow evidence overrides?',
+    'The retriever-authored default plan is shown above. Apply narrow overrides (promote reserve files, include/exclude symbols, tune neighbor lines) before previewing?',
+  );
+  await logEvent('stage4.override_decision', { wantsOverrides });
+
+  if (wantsOverrides) {
+    const rawInput = await ctx.ui.input('Conductor: evidence overrides', OVERRIDE_HELP);
+    const text = rawInput?.trim() ?? '';
+    if (text) {
+      try {
+        const overrides = parseEvidenceOverridesInput(text);
+        if (overrides.length > 0) {
+          const result = applyEvidenceOverrides({
+            plan: defaultPlan,
+            retrieval_index: index,
+            overrides,
+          });
+          await runtime.store.put(result.plan);
+          await machine.setArtifact('evidence_plan_id', result.plan.artifact_id);
+          plan = result.plan;
+          await logEvent('stage4.overrides_applied', {
+            evidencePlanId: plan.artifact_id,
+            applied: result.applied,
+            overrideCount: overrides.length,
+          });
+          ctx.ui.notify(
+            `Overrides applied (${result.applied.length}):\n${result.applied.map((line) => `  - ${line}`).join('\n')}\n\nAdjusted plan:\n\n${summarizeEvidencePlan(plan, index)}`,
+            'info',
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await logEvent('stage4.override_error', { message });
+        ctx.ui.notify(
+          `Overrides rejected — keeping retriever defaults.\nReason: ${message}`,
+          'warning',
+        );
+      }
+    }
+  }
 
   const preview = await evidenceAssemble(
     {

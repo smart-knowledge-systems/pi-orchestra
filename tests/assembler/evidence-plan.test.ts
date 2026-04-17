@@ -577,4 +577,19 @@ describe('createRecommendedEvidencePlan', () => {
     const plan = createRecommendedEvidencePlan(index);
     expect(verifyEmbeddedIndex(plan, index)).toBe(true);
   });
+
+  it('hands a plan shape compatible with applyEvidenceOverrides', async () => {
+    const { applyEvidenceOverrides } = await import('../../src/conductor/evidence-overrides.ts');
+    const index = makeRecommendedIndex();
+    const plan = createRecommendedEvidencePlan(index);
+    const { plan: adjusted, applied } = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [{ op: 'promote_file', file_id: 'f_reserve', mode: 'summary' }],
+    });
+    expect(applied).toHaveLength(1);
+    expect(adjusted.selection.files.some((f) => f.file_id === 'f_reserve')).toBe(true);
+    // The recommended default still excluded f_reserve; overrides added it.
+    expect(plan.selection.files.some((f) => f.file_id === 'f_reserve')).toBe(false);
+  });
 });
