@@ -1,0 +1,24 @@
+2026-04-17 AR-P1-T1/T2: extended v1 artifact types for cleaned intent + retrieval recommendations; runtime validators and fixtures updated; test-only callers patched for new required fields.
+
+===== 2026-04-17T21:09:58Z | opus implement =====
+Both active tasks are complete. Summary:
+
+**AR-P1-T1 — types**: Extended `src/artifacts/types.ts`:
+- `IntentCaptureV1`: added required `cleaned_user_intent` and optional `intent_file_refs` (with `IntentFileRef`/`IntentFileRefSource`).
+- `RetrievalIndexV1`: added required `strategy_summary`, `scout_terms`, `recommended_evidence` (with `RetrievalRecommendedEvidence`, `RecommendedEvidenceFile`, `RecommendedEvidenceSpan`).
+- `RetrievalFile`: added `selection_tier`, `selection_reason`, `default_evidence_mode` (with `RetrievalSelectionTier`, `RetrievalDefaultEvidenceMode`).
+- `RetrievalSymbol`: added `selected_by_default`, `default_neighbor_lines`, `selection_reason`.
+
+**AR-P1-T2 — schemas + fixtures + tests**: 
+- `src/artifacts/schemas.ts`: validators for all new fields (union-value checks for source/tier/mode, nested validation for `recommended_evidence` spans).
+- `tests/fixtures/sample-artifacts/intent-capture-v1.json` and `retrieval-index-v1.json`: updated with new shape (selected + reserve file example, recommended evidence payload, intent_file_refs).
+- `tests/artifacts/schemas.test.ts`: added negative tests for missing cleaned_user_intent, bad intent_file_refs, missing strategy/scout/recommended_evidence, invalid selection_tier and default_evidence_mode, and malformed recommended_evidence spans.
+
+**Caller coherence**: Updated producers to supply safe defaults so the codebase compiles:
+- `src/conductor/stage-1.ts`: populates `cleaned_user_intent` (defaults to verbatim; Phase 2 will refine).
+- `src/retriever/normalize.ts`: fills new retrieval defaults (`strategy_summary: ''`, `scout_terms: []`, `recommended_evidence: empty`, per-file `selection_tier: 'selected'`/`default_evidence_mode: 'summary'`, per-symbol zeroed defaults).
+- Test construction sites in 9 files updated to match new shapes.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 378 pass / 2 fail — both failures (`tests/retriever/prompt.test.ts`) are pre-existing ("Tagged files:" vs "User-tagged files:") and unrelated to this work.
+
+**Nothing unfinished** within the scope of AR-P1-T1 and AR-P1-T2.
