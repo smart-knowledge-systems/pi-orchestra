@@ -6,6 +6,8 @@
   "intent_spec_id": "spec_001",
   "query": "Understand model restore flow and modification boundaries",
   "confidence": "high",
+  "strategy_summary": "Scout-narrowed candidates, agent-confirmed restore entrypoint and registry auth dependency.",
+  "scout_terms": ["restoreModelFromSession", "model-resolver", "model-registry"],
   "files": [
     {
       "file_id": "f1",
@@ -20,6 +22,9 @@
       ],
       "recommended_expansion": "span",
       "expansion_reason": "Fallback logic is concentrated in one function",
+      "selection_tier": "selected",
+      "selection_reason": "Primary restore entrypoint identified by scout and confirmed by agent read",
+      "default_evidence_mode": "spans",
       "symbols": [
         {
           "symbol_id": "s1",
@@ -35,12 +40,68 @@
           "change_likelihood": "high",
           "expansion_priority": "high",
           "recommended_expansion": "span",
-          "expansion_reason": "Likely contains the exact restore decision logic"
+          "expansion_reason": "Likely contains the exact restore decision logic",
+          "selected_by_default": true,
+          "default_neighbor_lines": 4,
+          "selection_reason": "Exact restore decision logic lives here"
+        }
+      ]
+    },
+    {
+      "file_id": "f2",
+      "path": "/abs/path/src/core/model-registry.ts",
+      "why_relevant": "Resolves auth configuration that gates restore",
+      "file_summary": "Model registry lookup and auth configuration checks",
+      "ast_skeleton": ["function find(...)", "function hasConfiguredAuth(...)"],
+      "recommended_expansion": "summary",
+      "expansion_reason": "Only the auth predicate matters for restore",
+      "selection_tier": "reserve",
+      "selection_reason": "Supports restore only if auth resolution is in scope",
+      "default_evidence_mode": "summary",
+      "symbols": [
+        {
+          "symbol_id": "s2",
+          "kind": "function",
+          "name": "hasConfiguredAuth",
+          "start": 88,
+          "count": 24,
+          "summary": "Returns whether a provider has configured auth",
+          "role_in_system": "auth predicate",
+          "depends_on": [],
+          "used_by": ["restoreModelFromSession"],
+          "relevance": "medium",
+          "change_likelihood": "low",
+          "expansion_priority": "medium",
+          "recommended_expansion": "summary",
+          "expansion_reason": "Reserve candidate; only expand on promotion",
+          "selected_by_default": false,
+          "default_neighbor_lines": 0,
+          "selection_reason": "Reserve — not included unless conductor promotes"
         }
       ]
     }
   ],
   "cross_file_findings": ["Restore behavior depends on registry availability and auth"],
   "gaps": ["Need auth resolution details from model-registry.ts"],
-  "followup_queries": ["model registry auth configured availability"]
+  "followup_queries": ["model registry auth configured availability"],
+  "recommended_evidence": {
+    "files": [
+      {
+        "file_id": "f1",
+        "include_ast_skeleton": true,
+        "include_retriever_summary": true,
+        "include_entire_file": false,
+        "spans": [
+          {
+            "symbol_id": "s1",
+            "include_span": true,
+            "neighbor_lines": 4
+          }
+        ]
+      }
+    ],
+    "include_cross_file_findings": true,
+    "include_gaps": true,
+    "include_followup_queries": false
+  }
 }

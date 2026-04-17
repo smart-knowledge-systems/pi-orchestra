@@ -1,7 +1,12 @@
 {
   "artifact_type": "intent-capture-v1",
   "artifact_id": "intent_001",
-  "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",
+  "user_intent_verbatim": "I want to understand how model restore works and maybe change it. <file name=\"src/core/model-resolver.ts\">...</file>",
+  "cleaned_user_intent": "I want to understand how model restore works and maybe change it.",
   "tagged_files": ["docs/models.md", "src/core/model-resolver.ts"],
+  "intent_file_refs": [
+    { "path": "src/core/model-resolver.ts", "source": "inline" },
+    { "path": "docs/models.md", "source": "reference-only" }
+  ],
   "timestamp": "2026-04-09T00:00:00Z"
 }
