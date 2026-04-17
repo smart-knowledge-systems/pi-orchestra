@@ -421,7 +421,7 @@
         "docs/conductor-overview.md"
       ],
       "dependencies": ["AR-P5-T2", "AR-P6-T2", "AR-P7-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Formal docs describe the deterministic scout plus bounded file-reading retriever agent",
         "Docs clearly state that the stored retrieval artifact remains structural-only",
@@ -442,11 +442,72 @@
         "tests/assembler/evidence-assembler.test.ts"
       ],
       "dependencies": ["AR-P2-T2", "AR-P4-T3", "AR-P6-T2", "AR-P7-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "End-to-end tests prove Stage 1 can use user-supplied file context without broadening conductor repo access",
         "End-to-end tests prove retrieval narrows the default evidence package compared with the previous heuristic default",
         "The evidence assembler materializes only the selected raw evidence while preserving deterministic behavior"
+      ]
+    },
+    {
+      "id": "AR-P7-T4",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Make set_file_mode overrides actually suppress stale span evidence",
+      "scope": "medium",
+      "description": "Ensure set_file_mode changes are semantically complete: switching a plan file to summary, summary+ast, or exclude must not leave old span selections active in the assembler.",
+      "deliverable": "Override mode changes that keep plan flags and emitted raw evidence in sync",
+      "files": [
+        "src/conductor/evidence-overrides.ts",
+        "src/services/evidence-assembler.ts",
+        "tests/assembler/evidence-overrides.test.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": ["AR-P7-T1", "AR-P7-T2", "AR-P7-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "set_file_mode to summary or summary+ast does not materialize previously selected raw spans unless they remain explicitly intended",
+        "set_file_mode to exclude suppresses evidence for the target file rather than leaving stale span selections active",
+        "Regression tests cover files with pre-existing spans that are narrowed or excluded via overrides"
+      ]
+    },
+    {
+      "id": "AR-P7-T5",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Make promote_file span-mode overrides produce concrete span behavior",
+      "scope": "medium",
+      "description": "Align promote_file(..., mode: \"spans\") with actual evidence materialization so the override either seeds concrete default spans from retrieval metadata or fails loudly until symbols are specified.",
+      "deliverable": "Promote-file span mode with non-misleading behavior and regression coverage",
+      "files": [
+        "src/conductor/evidence-overrides.ts",
+        "extensions/conductor-extension.ts",
+        "tests/assembler/evidence-overrides.test.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": ["AR-P7-T1", "AR-P7-T2", "AR-P7-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "promote_file with mode=spans no longer yields a spanless plan entry that materializes no raw span evidence",
+        "User-facing override help text matches the implemented promote_file span semantics",
+        "Tests cover the chosen behavior for reserve-file promotion in spans mode"
+      ]
+    },
+    {
+      "id": "AR-P7-T6",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Render evidence-stage summaries from adjusted plan state",
+      "scope": "short",
+      "description": "Update conductor evidence-stage summaries so overridden or promoted files are labeled from the current evidence plan rather than stale retrieval defaults.",
+      "deliverable": "Evidence-stage summaries that reflect actual adjusted file modes and inclusions",
+      "files": ["extensions/conductor-extension.ts"],
+      "dependencies": ["AR-P7-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Summary labels derive from the current plan state rather than retrieval defaults when they differ",
+        "Promoted reserve files and set_file_mode overrides show the effective mode in the conductor summary",
+        "The evidence-stage review output stays consistent with the plan that will actually be previewed and materialized"
       ]
     }
   ]
