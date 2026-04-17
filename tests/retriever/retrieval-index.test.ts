@@ -542,6 +542,76 @@ describe('retrievalDispatch integration', () => {
     // No raw full-file content in the artifact
     const serialized = JSON.stringify(stored);
     expect(serialized).not.toContain('raw_content');
+
+    // Scout-authored fields propagate through normalization.
+    expect(typeof stored!.strategy_summary).toBe('string');
+    expect(stored!.strategy_summary.length).toBeGreaterThan(0);
+    expect(Array.isArray(stored!.scout_terms)).toBe(true);
+
+    // Every file has a valid selection tier and evidence mode.
+    for (const file of stored!.files) {
+      expect(['selected', 'reserve']).toContain(file.selection_tier);
+      expect(['exclude', 'summary', 'summary+ast', 'spans', 'whole_file']).toContain(
+        file.default_evidence_mode,
+      );
+    }
+
+    // Dispatch narrows the default evidence set — no more than the scout's
+    // SELECTED_LIMIT (8), strictly below the old single-pass default of 12.
+    const selected = stored!.files.filter((f) => f.selection_tier === 'selected');
+    expect(selected.length).toBeLessThanOrEqual(8);
+    expect(selected.length).toBeLessThan(12);
+
+    // The dispatch status message reflects the new selected/reserve split.
+    expect(result.message).toContain('selected');
+  });
+
+  test('dispatch runs scout before producing the retrieval index', async () => {
+    // Add a tagged file so we can assert the scout-driven boost ended up in
+    // the stored artifact (pure dispatch-level evidence the scout ran).
+    const capture: IntentCaptureV1 = {
+      artifact_type: 'intent-capture-v1',
+      artifact_id: generateArtifactId('intent-capture-v1'),
+      user_intent_verbatim: 'Investigate handler.ts',
+      cleaned_user_intent: 'Investigate handler.ts',
+      tagged_files: ['src/handler.ts'],
+      timestamp: new Date().toISOString(),
+    };
+    await store.put(capture);
+    const restatement: IntentRestatementV1 = {
+      artifact_type: 'intent-restatement-v1',
+      artifact_id: generateArtifactId('intent-restatement-v1'),
+      intent_capture_id: capture.artifact_id,
+      user_intent_verbatim: capture.user_intent_verbatim,
+      restated_intent: 'Understand the request handler implementation',
+      approved: true,
+      expand_requested: false,
+      approval_turns: 1,
+    };
+    await store.put(restatement);
+
+    const result = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(result.status).toBe('success');
+    const stored = await store.get('retrieval-index-v1', result.retrieval_index_id!);
+    expect(stored).not.toBeNull();
+
+    // scout_terms should carry at least one term drawn from the tagged file
+    // or the restatement.
+    expect(stored!.scout_terms.length).toBeGreaterThan(0);
+
+    // The tagged file should be promoted into the selected tier by the scout.
+    const tagged = stored!.files.find((f) => f.path.endsWith('/src/handler.ts'));
+    expect(tagged).toBeDefined();
+    expect(tagged!.selection_tier).toBe('selected');
+    expect(tagged!.selection_reason).toContain('tagged');
   });
 
   test('returns error when intent capture is missing', async () => {
