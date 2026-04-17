@@ -82,6 +82,8 @@ function makeIndex(): RetrievalIndexV1 {
     intent_spec_id: null,
     query: 'determinism test',
     confidence: 'high',
+    strategy_summary: '',
+    scout_terms: [],
     files: [
       {
         file_id: 'fa',
@@ -91,6 +93,9 @@ function makeIndex(): RetrievalIndexV1 {
         ast_skeleton: ['function alpha()', 'function beta()', 'function gamma()'],
         recommended_expansion: 'none',
         expansion_reason: '',
+        selection_tier: 'selected',
+        selection_reason: '',
+        default_evidence_mode: 'summary',
         symbols: [
           {
             symbol_id: 'sa1',
@@ -107,6 +112,9 @@ function makeIndex(): RetrievalIndexV1 {
             expansion_priority: 'high',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
           {
             symbol_id: 'sa2',
@@ -123,6 +131,9 @@ function makeIndex(): RetrievalIndexV1 {
             expansion_priority: 'medium',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
           {
             symbol_id: 'sa3',
@@ -139,6 +150,9 @@ function makeIndex(): RetrievalIndexV1 {
             expansion_priority: 'low',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
         ],
       },
@@ -150,6 +164,9 @@ function makeIndex(): RetrievalIndexV1 {
         ast_skeleton: ['const X', 'const Y', 'function compute()'],
         recommended_expansion: 'none',
         expansion_reason: '',
+        selection_tier: 'selected',
+        selection_reason: '',
+        default_evidence_mode: 'summary',
         symbols: [
           {
             symbol_id: 'sb1',
@@ -166,6 +183,9 @@ function makeIndex(): RetrievalIndexV1 {
             expansion_priority: 'medium',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
         ],
       },
@@ -173,6 +193,12 @@ function makeIndex(): RetrievalIndexV1 {
     cross_file_findings: ['a and b are independent'],
     gaps: ['Missing tests'],
     followup_queries: ['test coverage details'],
+    recommended_evidence: {
+      files: [],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    },
   };
 }
 
@@ -225,6 +251,7 @@ async function seedAll(index: RetrievalIndexV1, plan: EvidencePlanV1) {
     artifact_type: 'intent-capture-v1',
     artifact_id: 'ic_det',
     user_intent_verbatim: 'test',
+    cleaned_user_intent: 'test',
     tagged_files: [],
     timestamp: '2026-04-09T00:00:00Z',
   };

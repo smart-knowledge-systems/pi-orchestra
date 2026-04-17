@@ -29,6 +29,7 @@ function makeIntentCapture(id?: string): IntentCaptureV1 {
     artifact_type: 'intent-capture-v1',
     artifact_id: id ?? generateArtifactId('intent-capture-v1'),
     user_intent_verbatim: 'Add dark mode support',
+    cleaned_user_intent: 'Add dark mode support',
     tagged_files: ['src/theme.ts'],
     timestamp: new Date().toISOString(),
   };

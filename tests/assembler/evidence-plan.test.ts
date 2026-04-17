@@ -20,6 +20,8 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
     intent_spec_id: null,
     query: 'test query',
     confidence: 'high',
+    strategy_summary: '',
+    scout_terms: [],
     files: [
       {
         file_id: 'f1',
@@ -29,6 +31,9 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
         ast_skeleton: ['function main()', 'function init()'],
         recommended_expansion: 'none',
         expansion_reason: '',
+        selection_tier: 'selected',
+        selection_reason: '',
+        default_evidence_mode: 'summary',
         symbols: [
           {
             symbol_id: 's1',
@@ -45,6 +50,9 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
             expansion_priority: 'high',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
           {
             symbol_id: 's2',
@@ -61,6 +69,9 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
             expansion_priority: 'medium',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
         ],
       },
@@ -72,6 +83,9 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
         ast_skeleton: ['function formatDate()'],
         recommended_expansion: 'none',
         expansion_reason: '',
+        selection_tier: 'selected',
+        selection_reason: '',
+        default_evidence_mode: 'summary',
         symbols: [
           {
             symbol_id: 's3',
@@ -88,6 +102,9 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
             expansion_priority: 'low',
             recommended_expansion: 'none',
             expansion_reason: '',
+            selected_by_default: false,
+            default_neighbor_lines: 0,
+            selection_reason: '',
           },
         ],
       },
@@ -95,6 +112,12 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
     cross_file_findings: ['main imports utils'],
     gaps: ['Missing auth module'],
     followup_queries: ['auth flow details'],
+    recommended_evidence: {
+      files: [],
+      include_cross_file_findings: false,
+      include_gaps: false,
+      include_followup_queries: false,
+    },
     ...overrides,
   };
 }

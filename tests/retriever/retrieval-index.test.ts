@@ -483,6 +483,7 @@ describe('retrievalDispatch integration', () => {
       artifact_type: 'intent-capture-v1',
       artifact_id: generateArtifactId('intent-capture-v1'),
       user_intent_verbatim: 'How does the request handler work?',
+      cleaned_user_intent: 'How does the request handler work?',
       tagged_files: [],
       timestamp: new Date().toISOString(),
     };
@@ -563,6 +564,7 @@ describe('retrievalDispatch integration', () => {
       artifact_type: 'intent-capture-v1',
       artifact_id: generateArtifactId('intent-capture-v1'),
       user_intent_verbatim: 'test',
+      cleaned_user_intent: 'test',
       tagged_files: [],
       timestamp: new Date().toISOString(),
     };

@@ -43,6 +43,7 @@ async function createApprovedIntent(store: ArtifactStore, machine: StageMachine)
     artifact_type: 'intent-capture-v1',
     artifact_id: captureId,
     user_intent_verbatim: 'Test intent',
+    cleaned_user_intent: 'Test intent',
     tagged_files: [],
     timestamp: new Date().toISOString(),
   };
@@ -96,6 +97,7 @@ describe('canStartRetrieval', () => {
       artifact_type: 'intent-capture-v1',
       artifact_id: captureId,
       user_intent_verbatim: 'Test',
+      cleaned_user_intent: 'Test',
       tagged_files: [],
       timestamp: new Date().toISOString(),
     };
@@ -134,6 +136,7 @@ describe('canStartRetrieval', () => {
       artifact_type: 'intent-capture-v1',
       artifact_id: captureId,
       user_intent_verbatim: 'Test with expansion',
+      cleaned_user_intent: 'Test with expansion',
       tagged_files: [],
       timestamp: new Date().toISOString(),
     };
