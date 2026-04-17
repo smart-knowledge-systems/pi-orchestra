@@ -1,0 +1,453 @@
+{
+  "generated_at": "2026-04-17T00:00:00Z",
+  "project": "pi-orchestra",
+  "source_plan": "implementation-agentic-retrieval.md",
+  "tasks": [
+    {
+      "id": "AR-P1-T1",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Extend artifact type definitions for cleaned intent and retrieval recommendations",
+      "scope": "medium",
+      "description": "Update the v1 artifact type definitions so intent capture can store a cleaned intent and retrieval artifacts can carry explicit default evidence recommendations, selection tiers, and strategy metadata.",
+      "deliverable": "Revised v1 artifact type definitions aligned with the agentic retrieval roadmap",
+      "files": ["src/artifacts/types.ts"],
+      "dependencies": [],
+      "status": "planned",
+      "acceptance_criteria": [
+        "intent-capture-v1 can represent raw user input and cleaned user intent",
+        "retrieval-index-v1 can represent selected/reserve candidates and explicit recommended_evidence data",
+        "Type definitions remain coherent for store, conductor, retriever, and assembler callers"
+      ]
+    },
+    {
+      "id": "AR-P1-T2",
+      "sprint": "Sprint 1",
+      "phase": 1,
+      "title": "Update runtime validators and fixtures for revised v1 contracts",
+      "scope": "medium",
+      "description": "Extend runtime schema validation and sample artifact fixtures to cover the new v1 intent and retrieval fields without introducing a version bump.",
+      "deliverable": "Validated revised v1 schemas and fixtures for intent capture and retrieval artifacts",
+      "files": [
+        "src/artifacts/schemas.ts",
+        "tests/artifacts/schemas.test.ts",
+        "tests/fixtures/sample-artifacts/"
+      ],
+      "dependencies": ["AR-P1-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Revised v1 artifact shapes validate successfully on the happy path",
+        "Invalid or incomplete retrieval recommendation structures fail with clear errors",
+        "Sample fixtures reflect the new contract and validate cleanly"
+      ]
+    },
+    {
+      "id": "AR-P2-T1",
+      "sprint": "Sprint 2",
+      "phase": 2,
+      "title": "Implement intent-file extraction and cleaned-intent helpers",
+      "scope": "medium",
+      "description": "Add utilities that parse inline <file name=...> blocks from the initial user intent, extract tagged file paths, and build bounded restatement context without granting general conductor-side repo browsing.",
+      "deliverable": "Reusable helper for extracting tagged files, cleaned intent text, and bounded user-supplied file context",
+      "files": ["src/util/intent-files.ts"],
+      "dependencies": ["AR-P1-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Inline user-supplied file blocks are parsed into stable path references and cleaned intent text",
+        "Tagged files are derived deterministically from the initial intent",
+        "Restatement context generation is bounded and does not expose arbitrary repo reads"
+      ]
+    },
+    {
+      "id": "AR-P2-T2",
+      "sprint": "Sprint 2",
+      "phase": 2,
+      "title": "Wire Stage 1 capture and restatement to use user-supplied file context",
+      "scope": "medium",
+      "description": "Update the extension entrypoint and Stage 1 controller so intent capture persists raw and cleaned intent, and restatement model calls can use user-supplied file context before approval.",
+      "deliverable": "Stage 1 flow that uses included intent files during restatement and persists cleaned intent metadata",
+      "files": [
+        "extensions/conductor-extension.ts",
+        "src/conductor/stage-1.ts",
+        "src/artifacts/types.ts"
+      ],
+      "dependencies": ["AR-P1-T2", "AR-P2-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Initial restatement receives cleaned intent plus bounded included-file context",
+        "Intent capture artifacts persist tagged files and cleaned intent data",
+        "No new general-purpose conductor repo-reading capability is introduced"
+      ]
+    },
+    {
+      "id": "AR-P2-T3",
+      "sprint": "Sprint 2",
+      "phase": 2,
+      "title": "Update expansion and retrieval inputs to consume cleaned intent",
+      "scope": "short",
+      "description": "Ensure downstream expansion and retrieval assembly use the cleaned user intent rather than inheriting large inline file bodies from the original message.",
+      "deliverable": "Expansion and retrieval inputs grounded in cleaned intent while preserving tagged file references",
+      "files": [
+        "src/conductor/expansion.ts",
+        "src/services/retrieval-dispatch.ts",
+        "src/retriever/prompt.ts"
+      ],
+      "dependencies": ["AR-P2-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Expansion uses cleaned user intent by default",
+        "Retrieval prompt assembly does not embed entire inline file bodies from the initial message",
+        "Tagged files remain available to expansion and retrieval logic"
+      ]
+    },
+    {
+      "id": "AR-P3-T1",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Extract deterministic scout module and curated search-term generation",
+      "scope": "medium",
+      "description": "Factor the current heuristic retrieval logic into a deterministic scout module that crafts intent-shaped search terms from cleaned intent, restatement, retrieval focus, and tagged files.",
+      "deliverable": "Dedicated scout pass with deterministic curated term generation",
+      "files": ["src/retriever/scout.ts", "src/retriever/prompt.ts", "src/retriever/worker.ts"],
+      "dependencies": ["AR-P2-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Scout term generation is deterministic and no longer a naive split-all-words strategy",
+        "Tagged files and retrieval focus materially influence scout term selection",
+        "Scout logic is separated from the later model-driven retrieval loop"
+      ]
+    },
+    {
+      "id": "AR-P3-T2",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Produce ranked scout candidates with selection tiers and role hints",
+      "scope": "medium",
+      "description": "Extend the scout to emit a narrow selected/reserve candidate set with rationale, file role hints, top symbol candidates, and default-evidence mode hints suitable for the retriever agent's first turn.",
+      "deliverable": "Deterministic scout output with selected and reserve candidates plus rationale",
+      "files": ["src/retriever/scout.ts", "src/retriever/worker.ts"],
+      "dependencies": ["AR-P3-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Scout output distinguishes selected and reserve candidates",
+        "Each selected candidate includes a stable rationale and role hint",
+        "Scout output remains intentionally narrow and bounded"
+      ]
+    },
+    {
+      "id": "AR-P3-T3",
+      "sprint": "Sprint 3",
+      "phase": 3,
+      "title": "Integrate the scout into retrieval dispatch and add deterministic scout tests",
+      "scope": "medium",
+      "description": "Route retrieval dispatch through the new scout pass and add tests that lock in deterministic candidate narrowing, tagged-file boosting, and curated-term behavior.",
+      "deliverable": "Retrieval dispatch seeded by scout output with dedicated scout regression coverage",
+      "files": [
+        "src/services/retrieval-dispatch.ts",
+        "tests/retriever/scout.test.ts",
+        "tests/retriever/retrieval-index.test.ts"
+      ],
+      "dependencies": ["AR-P3-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Retrieval dispatch runs the scout before any model-driven retrieval work",
+        "Scout tests prove deterministic candidate selection and tagged-file boosting",
+        "The candidate set is measurably narrower than the old single-pass heuristic default"
+      ]
+    },
+    {
+      "id": "AR-P4-T1",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Define retriever agent protocol, prompts, and round contracts",
+      "scope": "medium",
+      "description": "Introduce the structured protocol for a bounded model-driven retriever agent, including round input/output shapes, prompt assembly, and explicit action types.",
+      "deliverable": "Typed retriever-agent protocol and prompt modules",
+      "files": [
+        "src/retriever/agent-types.ts",
+        "src/retriever/agent-prompt.ts",
+        "src/retriever/agent.ts"
+      ],
+      "dependencies": ["AR-P3-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Retriever-agent round contracts are fully typed",
+        "Prompts constrain the agent to structured JSON actions and bounded behavior",
+        "Protocol design supports stop/continue semantics and final recommended_evidence output"
+      ]
+    },
+    {
+      "id": "AR-P4-T2",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Implement deterministic retrieval action executor",
+      "scope": "medium",
+      "description": "Build the deterministic executor that performs retriever-agent actions such as reading files, searching content, searching paths, and following imports within strict bounds.",
+      "deliverable": "Bounded retrieval action executor for the model-driven retriever agent",
+      "files": ["src/retriever/executor.ts", "src/retriever/worker.ts"],
+      "dependencies": ["AR-P4-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Supported action types are executed deterministically within repo bounds",
+        "File observations are bounded by explicit line/byte limits",
+        "Executor results are suitable for the next retriever-agent round without storing raw content in artifacts"
+      ]
+    },
+    {
+      "id": "AR-P4-T3",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Implement bounded retriever agent loop with injected model callback",
+      "scope": "medium",
+      "description": "Add the bounded round loop that combines scout output, model guidance, and deterministic executor observations to select files, symbols, and default evidence scope.",
+      "deliverable": "Working bounded retriever-agent orchestration inside the retrieval boundary",
+      "files": [
+        "src/retriever/agent.ts",
+        "src/retriever/worker.ts",
+        "src/services/retrieval-dispatch.ts",
+        "extensions/conductor-extension.ts"
+      ],
+      "dependencies": ["AR-P4-T1", "AR-P4-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Retriever-agent rounds terminate under explicit round and action caps",
+        "The agent can read files, follow leads, and emit final recommended_evidence selections",
+        "Model-calling details stay at the extension edge or dispatch boundary rather than leaking into conductor logic"
+      ]
+    },
+    {
+      "id": "AR-P4-T4",
+      "sprint": "Sprint 4",
+      "phase": 4,
+      "title": "Add retriever-agent tests for bounded behavior and false-positive rejection",
+      "scope": "medium",
+      "description": "Create test coverage for the retriever agent's bounded loop, including file reads, import following, stop conditions, and rejection of false-positive candidates.",
+      "deliverable": "Retriever-agent regression suite covering bounded multi-round behavior",
+      "files": ["tests/retriever/agent.test.ts", "tests/retriever/retrieval-index.test.ts"],
+      "dependencies": ["AR-P4-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Tests prove the retriever agent stops within configured bounds",
+        "Tests cover file-read actions, import following, and false-positive rejection",
+        "Tests assert that final selected files are narrower and better justified than scout-only candidates"
+      ]
+    },
+    {
+      "id": "AR-P5-T1",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Extend retrieval normalization for structural-only recommended evidence output",
+      "scope": "medium",
+      "description": "Update retrieval normalization so raw retriever-agent output becomes a conductor-safe structural artifact carrying strategy metadata, selection tiers, and exact recommended_evidence data.",
+      "deliverable": "Normalized retrieval artifacts that remain structural-only while expressing default evidence scope",
+      "files": ["src/retriever/normalize.ts", "src/artifacts/types.ts", "src/artifacts/schemas.ts"],
+      "dependencies": ["AR-P1-T2", "AR-P4-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Normalized retrieval artifacts contain strategy summary, selection tiers, and recommended_evidence",
+        "No raw file bodies from the retriever agent leak into stored artifacts",
+        "Normalization still enforces absolute paths and valid line-number ranges"
+      ]
+    },
+    {
+      "id": "AR-P5-T2",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Extend artifact inspection and conductor retrieval summaries",
+      "scope": "medium",
+      "description": "Expose the new structural retrieval recommendation data through artifact inspection so the conductor can see selected/reserve files and default evidence scope without seeing raw source.",
+      "deliverable": "Conductor-safe retrieval inspection with selected/reserve and default-scope metadata",
+      "files": [
+        "src/services/artifact-inspect.ts",
+        "src/conductor/retrieval.ts",
+        "extensions/conductor-extension.ts"
+      ],
+      "dependencies": ["AR-P5-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "artifact_inspect surfaces selected/reserve files, default evidence modes, and strategy metadata",
+        "Conductor retrieval summaries explain the narrowed default scope without leaking raw code",
+        "Evidence-bundle payload inspection remains blocked"
+      ]
+    },
+    {
+      "id": "AR-P5-T3",
+      "sprint": "Sprint 5",
+      "phase": 5,
+      "title": "Refresh retrieval fixtures and validation tests for the new structural contract",
+      "scope": "short",
+      "description": "Update sample retrieval fixtures and test coverage to assert the new structural retrieval fields and the absence of raw content leaks.",
+      "deliverable": "Fixtures and tests aligned with the revised structural retrieval artifact",
+      "files": [
+        "tests/retriever/normalize.test.ts",
+        "tests/conductor/retrieval-stage.test.ts",
+        "tests/fixtures/sample-artifacts/retrieval-index-v1.json"
+      ],
+      "dependencies": ["AR-P5-T1", "AR-P5-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Retrieval fixtures reflect the new recommendation-rich structural shape",
+        "Normalization tests assert no raw file content leakage",
+        "Conductor retrieval-stage tests cover the expanded inspection payload"
+      ]
+    },
+    {
+      "id": "AR-P6-T1",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Implement createRecommendedEvidencePlan from retriever recommendations",
+      "scope": "medium",
+      "description": "Add a helper that builds the default evidence plan directly from retrieval recommended_evidence data rather than using conductor-guessed summary and span defaults.",
+      "deliverable": "Recommended evidence-plan authoring helper driven by retrieval artifact recommendations",
+      "files": ["src/conductor/evidence-plan.ts"],
+      "dependencies": ["AR-P5-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "The default plan can be derived exactly from retrieval recommended_evidence fields",
+        "Selected symbols and neighbor-line defaults are preserved without conductor guesswork",
+        "Reserve files are excluded from the default plan unless explicitly promoted"
+      ]
+    },
+    {
+      "id": "AR-P6-T2",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Replace naive conductor evidence planning with retriever-authored defaults",
+      "scope": "medium",
+      "description": "Update the extension evidence stage to stop using summary-for-all and first-two-symbol heuristics, and instead materialize the retriever-authored default evidence plan.",
+      "deliverable": "Extension evidence stage driven by retriever-authored default scope",
+      "files": ["extensions/conductor-extension.ts", "src/conductor/evidence-plan.ts"],
+      "dependencies": ["AR-P6-T1", "AR-P5-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "The default evidence stage path uses retriever recommendations rather than conductor heuristics",
+        "Evidence preview shows a materially narrower plan by default",
+        "The conductor can still inspect the plan before materialization"
+      ]
+    },
+    {
+      "id": "AR-P6-T3",
+      "sprint": "Sprint 6",
+      "phase": 6,
+      "title": "Update budget and evidence tests for retriever-authored default scope",
+      "scope": "medium",
+      "description": "Adjust budget estimation and evidence tests to reflect retriever-authored default evidence scope rather than broad summary coverage across all retrieved files.",
+      "deliverable": "Budget and evidence test suite aligned with narrower retriever-authored plans",
+      "files": [
+        "src/util/budget.ts",
+        "tests/assembler/evidence-plan.test.ts",
+        "tests/assembler/budget.test.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": ["AR-P6-T1", "AR-P6-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Budget estimates align with recommended evidence scope rather than summary-for-all defaults",
+        "Evidence-plan tests assert the mapping from retrieval recommendations to plan selections",
+        "Assembler tests continue to pass with the narrower default plans"
+      ]
+    },
+    {
+      "id": "AR-P7-T1",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Implement conductor override API for evidence-plan adjustments",
+      "scope": "medium",
+      "description": "Add narrow, deterministic override helpers so the conductor can promote reserve files, add or remove symbol spans, and tune neighbor lines without rebuilding the plan from scratch.",
+      "deliverable": "Deterministic evidence-plan override API for edge-case conductor adjustments",
+      "files": ["src/conductor/evidence-overrides.ts", "src/conductor/evidence-plan.ts"],
+      "dependencies": ["AR-P6-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Override helpers support file promotion/demotion, symbol inclusion/exclusion, and neighbor-line tuning",
+        "Overrides validate file and symbol references against the retrieval artifact",
+        "Overrides remain additive and deterministic rather than replacing retriever planning wholesale"
+      ]
+    },
+    {
+      "id": "AR-P7-T2",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Wire conductor override flow into the evidence-stage review path",
+      "scope": "medium",
+      "description": "Update the extension evidence-stage flow so the conductor can inspect retriever recommendations, optionally apply narrow overrides, and then preview/materialize the adjusted plan.",
+      "deliverable": "Evidence-stage wiring that supports retriever-default plans plus narrow conductor overrides",
+      "files": [
+        "extensions/conductor-extension.ts",
+        "src/conductor/evidence-overrides.ts",
+        "src/conductor/evidence-plan.ts"
+      ],
+      "dependencies": ["AR-P6-T2", "AR-P7-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "The evidence-stage path starts from retriever defaults and only then applies optional overrides",
+        "Conductor review output clearly distinguishes selected files, reserve files, and adjusted inclusions",
+        "Override support does not broaden conductor raw-file visibility"
+      ]
+    },
+    {
+      "id": "AR-P7-T3",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Add override tests and invalid-reference failure coverage",
+      "scope": "short",
+      "description": "Create focused test coverage for override operations, including reserve-file promotion, symbol-level tuning, and loud failures for bad file or symbol references.",
+      "deliverable": "Regression suite for evidence-plan overrides and validation failures",
+      "files": [
+        "tests/assembler/evidence-overrides.test.ts",
+        "tests/assembler/evidence-plan.test.ts"
+      ],
+      "dependencies": ["AR-P7-T1", "AR-P7-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Tests cover reserve-file promotion and span-level adjustment operations",
+        "Invalid override targets fail loudly and deterministically",
+        "Override tests prove the adjusted plan differs only in the intended places"
+      ]
+    },
+    {
+      "id": "AR-P8-T1",
+      "sprint": "Sprint 8",
+      "phase": 8,
+      "title": "Update formal specification docs for the agentic retrieval architecture",
+      "scope": "medium",
+      "description": "Bring the formal specification docs and conductor overview in line with the new Stage 1 intent-file exception, scout plus file-reading retriever agent, structural-only retrieval artifact, and retriever-authored default evidence scope.",
+      "deliverable": "Specification docs aligned with the implemented agentic retrieval design",
+      "files": [
+        "docs/specification/00-overview.md",
+        "docs/specification/01-artifacts-and-schemas.md",
+        "docs/specification/02-pi-architecture.md",
+        "docs/specification/03-prompts-and-protocol.md",
+        "docs/conductor-overview.md"
+      ],
+      "dependencies": ["AR-P5-T2", "AR-P6-T2", "AR-P7-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Formal docs describe the deterministic scout plus bounded file-reading retriever agent",
+        "Docs clearly state that the stored retrieval artifact remains structural-only",
+        "Docs describe the retriever as the primary author of default evidence scope and the conductor as a narrow override layer"
+      ]
+    },
+    {
+      "id": "AR-P8-T2",
+      "sprint": "Sprint 8",
+      "phase": 8,
+      "title": "Add end-to-end regression coverage for intent-file context and narrower evidence bundles",
+      "scope": "medium",
+      "description": "Add integration-level tests that exercise user-supplied intent files, scout plus agent retrieval narrowing, and evidence bundle shrinkage relative to the old broad defaults.",
+      "deliverable": "End-to-end regression suite covering the full revised retrieval and evidence path",
+      "files": [
+        "tests/interaction/agentic-retrieval-flow.test.ts",
+        "tests/interaction/stage-1.test.ts",
+        "tests/assembler/evidence-assembler.test.ts"
+      ],
+      "dependencies": ["AR-P2-T2", "AR-P4-T3", "AR-P6-T2", "AR-P7-T2"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "End-to-end tests prove Stage 1 can use user-supplied file context without broadening conductor repo access",
+        "End-to-end tests prove retrieval narrows the default evidence package compared with the previous heuristic default",
+        "The evidence assembler materializes only the selected raw evidence while preserving deterministic behavior"
+      ]
+    }
+  ]
+}
