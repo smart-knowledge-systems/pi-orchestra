@@ -163,14 +163,65 @@ function symbolToRaw(
   };
 }
 
+function includeFlagsForMode(mode: RetrievalDefaultEvidenceMode): {
+  include_ast_skeleton: boolean;
+  include_retriever_summary: boolean;
+  include_entire_file: boolean;
+} {
+  switch (mode) {
+    case 'whole_file':
+      return {
+        include_ast_skeleton: true,
+        include_retriever_summary: true,
+        include_entire_file: true,
+      };
+    case 'spans':
+    case 'summary+ast':
+      return {
+        include_ast_skeleton: true,
+        include_retriever_summary: true,
+        include_entire_file: false,
+      };
+    case 'summary':
+      return {
+        include_ast_skeleton: false,
+        include_retriever_summary: true,
+        include_entire_file: false,
+      };
+    case 'exclude':
+    default:
+      return {
+        include_ast_skeleton: false,
+        include_retriever_summary: false,
+        include_entire_file: false,
+      };
+  }
+}
+
 function candidateToRawFile(
   candidate: ScoutCandidate,
   tier: RetrievalSelectionTier,
 ): RawRetrievalFile {
   const { fileMode, reason } = roleToRecommendation(candidate.evidenceModeHint);
-  const symbols = candidate.topSymbols.map((sym) =>
-    symbolToRaw(sym, candidate.imports, candidate.role),
-  );
+  const flags = includeFlagsForMode(candidate.evidenceModeHint);
+  const spanMode = candidate.evidenceModeHint === 'spans';
+  const wholeFileMode = candidate.evidenceModeHint === 'whole_file';
+  const selectedTier = tier === 'selected';
+
+  const symbols = candidate.topSymbols.map((sym, idx) => {
+    const base = symbolToRaw(sym, candidate.imports, candidate.role);
+    // For the scout fallback, mark the top symbol of a spans-mode selected
+    // file as selected_by_default so the recommended_evidence payload has
+    // at least one concrete span. The agent path will replace these.
+    const selectedByDefault =
+      selectedTier && (spanMode || wholeFileMode) && sym.score >= 6 && idx === 0;
+    return {
+      ...base,
+      selected_by_default: selectedByDefault,
+      default_neighbor_lines: selectedByDefault ? 3 : 0,
+      selection_reason: selectedByDefault ? 'scout-identified top symbol for default spans' : '',
+    };
+  });
 
   const whyRelevant =
     tier === 'reserve' ? `reserve candidate: ${candidate.rationale}` : candidate.rationale;
@@ -185,6 +236,9 @@ function candidateToRawFile(
     selection_tier: tier,
     selection_reason: `${candidate.role} · ${candidate.rationale}`,
     default_evidence_mode: candidate.evidenceModeHint,
+    include_ast_skeleton: flags.include_ast_skeleton,
+    include_retriever_summary: flags.include_retriever_summary,
+    include_entire_file: flags.include_entire_file,
     symbols,
   };
 }
@@ -207,6 +261,9 @@ export function scoutToRawOutput(query: string, scout: ScoutResult): RawRetrieva
       .map((t) => `investigate ${t.term}-related callsites or configuration`),
     strategy_summary: scout.strategySummary,
     scout_terms: scout.scoutTerms,
+    include_cross_file_findings: scout.crossFileHints.length > 0,
+    include_gaps: scout.gaps.length > 0,
+    include_followup_queries: false,
   };
 }
 
@@ -248,6 +305,7 @@ function agentSymbolToRaw(
   agentSym: AgentSymbolSelection,
   baseSymbol: RawRetrievalSymbol | undefined,
 ): RawRetrievalSymbol {
+  const neighborLines = Math.max(0, Math.floor(agentSym.default_neighbor_lines));
   if (baseSymbol) {
     return {
       ...baseSymbol,
@@ -257,6 +315,9 @@ function agentSymbolToRaw(
         ? 'span'
         : baseSymbol.recommended_expansion,
       expansion_reason: agentSym.selection_reason || baseSymbol.expansion_reason,
+      selected_by_default: agentSym.selected_by_default,
+      default_neighbor_lines: neighborLines,
+      selection_reason: agentSym.selection_reason || baseSymbol.selection_reason || '',
     };
   }
   return {
@@ -273,6 +334,9 @@ function agentSymbolToRaw(
     expansion_priority: agentSym.selected_by_default ? 'high' : 'medium',
     recommended_expansion: agentSym.selected_by_default ? 'span' : 'none',
     expansion_reason: agentSym.selection_reason,
+    selected_by_default: agentSym.selected_by_default,
+    default_neighbor_lines: neighborLines,
+    selection_reason: agentSym.selection_reason,
   };
 }
 
@@ -317,6 +381,9 @@ function agentFileToRawFile(
       file.selection_reason ||
       (scout ? `${scout.role} · ${scout.rationale}` : 'retriever agent selection'),
     default_evidence_mode: file.default_evidence_mode,
+    include_ast_skeleton: file.include_ast_skeleton,
+    include_retriever_summary: file.include_retriever_summary,
+    include_entire_file: file.include_entire_file,
     symbols: [...agentSymbols, ...leftoverSymbols],
   };
 }
@@ -349,6 +416,9 @@ function agentToRawOutput(
     followup_queries: agentResult.recommendation.followup_queries,
     strategy_summary: agentResult.recommendation.strategy_summary || scout.strategySummary,
     scout_terms: scout.scoutTerms,
+    include_cross_file_findings: agentResult.recommendation.include_cross_file_findings,
+    include_gaps: agentResult.recommendation.include_gaps,
+    include_followup_queries: agentResult.recommendation.include_followup_queries,
   };
 }
 

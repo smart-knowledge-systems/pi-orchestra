@@ -717,3 +717,324 @@ describe('conductor boundary enforcement', () => {
     expect(artifact.files[0]!.symbols[0]!.summary).toBe('Performs secret operation');
   });
 });
+
+// ---------------------------------------------------------------------------
+// recommended_evidence (AR-P5-T1)
+// ---------------------------------------------------------------------------
+
+describe('normalizeRetrievalOutput recommended_evidence', () => {
+  beforeEach(() => resetNormalizeCounters());
+
+  test('emits selected-tier files with include flags derived from evidence mode', () => {
+    const raw: RawRetrievalOutput = {
+      query: 'q',
+      files: [
+        {
+          path: 'src/kept.ts',
+          why_relevant: 'core',
+          file_summary: 's',
+          selection_tier: 'selected',
+          default_evidence_mode: 'spans',
+          symbols: [
+            {
+              kind: 'function',
+              name: 'kept',
+              start: 10,
+              count: 5,
+              selected_by_default: true,
+              default_neighbor_lines: 3,
+              selection_reason: 'primary target',
+            },
+            {
+              kind: 'function',
+              name: 'other',
+              start: 20,
+              count: 5,
+              selected_by_default: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = normalizeRetrievalOutput({
+      raw,
+      repoRoot: '/repo',
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const rec = result.artifact.recommended_evidence;
+    expect(rec.files).toHaveLength(1);
+    const recFile = rec.files[0]!;
+    expect(recFile.file_id).toBe(result.artifact.files[0]!.file_id);
+    // `spans` mode implies ast + summary, no entire_file
+    expect(recFile.include_ast_skeleton).toBe(true);
+    expect(recFile.include_retriever_summary).toBe(true);
+    expect(recFile.include_entire_file).toBe(false);
+    // Only selected_by_default symbols appear in spans
+    expect(recFile.spans).toHaveLength(1);
+    expect(recFile.spans[0]!.symbol_id).toBe(result.artifact.files[0]!.symbols[0]!.symbol_id);
+    expect(recFile.spans[0]!.include_span).toBe(true);
+    expect(recFile.spans[0]!.neighbor_lines).toBe(3);
+  });
+
+  test('omits reserve-tier files from recommended_evidence', () => {
+    const raw: RawRetrievalOutput = {
+      query: 'q',
+      files: [
+        {
+          path: 'src/sel.ts',
+          why_relevant: 'x',
+          file_summary: 's',
+          selection_tier: 'selected',
+          default_evidence_mode: 'summary',
+          symbols: [],
+        },
+        {
+          path: 'src/res.ts',
+          why_relevant: 'x',
+          file_summary: 's',
+          selection_tier: 'reserve',
+          default_evidence_mode: 'summary',
+          symbols: [],
+        },
+      ],
+    };
+
+    const result = normalizeRetrievalOutput({
+      raw,
+      repoRoot: '/repo',
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const recIds = result.artifact.recommended_evidence.files.map((f) => f.file_id);
+    expect(recIds).toHaveLength(1);
+    expect(recIds[0]).toBe(result.artifact.files[0]!.file_id);
+  });
+
+  test('omits exclude-mode files from recommended_evidence', () => {
+    const raw: RawRetrievalOutput = {
+      query: 'q',
+      files: [
+        {
+          path: 'src/keep.ts',
+          why_relevant: 'x',
+          file_summary: 's',
+          selection_tier: 'selected',
+          default_evidence_mode: 'summary+ast',
+          symbols: [],
+        },
+        {
+          path: 'src/skip.ts',
+          why_relevant: 'x',
+          file_summary: 's',
+          selection_tier: 'selected',
+          default_evidence_mode: 'exclude',
+          symbols: [],
+        },
+      ],
+    };
+
+    const result = normalizeRetrievalOutput({
+      raw,
+      repoRoot: '/repo',
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const rec = result.artifact.recommended_evidence;
+    expect(rec.files).toHaveLength(1);
+    expect(rec.files[0]!.include_ast_skeleton).toBe(true);
+    expect(rec.files[0]!.include_retriever_summary).toBe(true);
+    expect(rec.files[0]!.include_entire_file).toBe(false);
+  });
+
+  test('whole_file mode sets include_entire_file true', () => {
+    const raw: RawRetrievalOutput = {
+      query: 'q',
+      files: [
+        {
+          path: 'src/short.ts',
+          why_relevant: 'short',
+          file_summary: 's',
+          selection_tier: 'selected',
+          default_evidence_mode: 'whole_file',
+          symbols: [],
+        },
+      ],
+    };
+
+    const result = normalizeRetrievalOutput({
+      raw,
+      repoRoot: '/repo',
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const recFile = result.artifact.recommended_evidence.files[0]!;
+    expect(recFile.include_entire_file).toBe(true);
+    expect(recFile.include_ast_skeleton).toBe(true);
+    expect(recFile.include_retriever_summary).toBe(true);
+  });
+
+  test('top-level include flags default from available data but honour overrides', () => {
+    const raw: RawRetrievalOutput = {
+      query: 'q',
+      files: [],
+      cross_file_findings: ['something'],
+      gaps: [],
+      include_followup_queries: true,
+    };
+    const result = normalizeRetrievalOutput({
+      raw,
+      repoRoot: '/repo',
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const rec = result.artifact.recommended_evidence;
+    // cross_file_findings present and no explicit flag => default true
+    expect(rec.include_cross_file_findings).toBe(true);
+    // gaps empty and no explicit flag => default false
+    expect(rec.include_gaps).toBe(false);
+    // explicit override honoured
+    expect(rec.include_followup_queries).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: agent-driven worker run narrows scout-only recommendation
+// ---------------------------------------------------------------------------
+
+describe('runRetrieverWorkerDetailed with stubbed model', () => {
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'piorx-worker-agent-test-'));
+  });
+
+  afterEach(async () => {
+    await teardown();
+  });
+
+  test('agent-driven run produces narrower recommended_evidence than scout-only', async () => {
+    const { runRetrieverWorkerDetailed } = await import('../../src/retriever/worker.ts');
+
+    // Three candidate files; only one is truly relevant.
+    const srcDir = resolve(tempDir, 'src');
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(
+      resolve(srcDir, 'request-handler.ts'),
+      ['export function handleRequest(req: Request) {', '  return new Response("ok");', '}'].join(
+        '\n',
+      ),
+    );
+    await writeFile(
+      resolve(srcDir, 'unrelated-handler.ts'),
+      ['// coincidental name match', 'export const HANDLER = "unrelated";'].join('\n'),
+    );
+    await writeFile(
+      resolve(srcDir, 'misc-handler.ts'),
+      ['// also unrelated', 'export const other = 1;'].join('\n'),
+    );
+
+    // Scout-only baseline
+    const scoutOnly = await runRetrieverWorkerDetailed({
+      repoRoot: tempDir,
+      query: 'investigate request handler',
+      restatedIntent: 'investigate the request handler',
+    });
+    const scoutSelected = scoutOnly.raw.files.filter((f) => f.selection_tier === 'selected');
+    expect(scoutSelected.length).toBeGreaterThanOrEqual(1);
+
+    // Stubbed model: narrows to just the real handler.
+    const stubModel = async () =>
+      JSON.stringify({
+        status: 'stop',
+        summary: 'focused on the real handler',
+        recommendation: {
+          strategy_summary: 'dropped unrelated handlers; kept request-handler.ts',
+          files: [
+            {
+              path: 'src/request-handler.ts',
+              tier: 'selected',
+              default_evidence_mode: 'spans',
+              selection_reason: 'defines handleRequest',
+              include_ast_skeleton: true,
+              include_retriever_summary: true,
+              include_entire_file: false,
+              symbols: [
+                {
+                  name: 'handleRequest',
+                  start: 1,
+                  count: 3,
+                  selected_by_default: true,
+                  default_neighbor_lines: 2,
+                  selection_reason: 'primary entry point',
+                },
+              ],
+            },
+          ],
+          cross_file_findings: [],
+          gaps: [],
+          followup_queries: [],
+          include_cross_file_findings: false,
+          include_gaps: false,
+          include_followup_queries: false,
+          confidence: 'high',
+        },
+      });
+
+    const agentRun = await runRetrieverWorkerDetailed({
+      repoRoot: tempDir,
+      query: 'investigate request handler',
+      restatedIntent: 'investigate the request handler',
+      model: stubModel,
+      agentLimits: { maxRounds: 2, maxActionsPerRound: 2 },
+    });
+
+    expect(agentRun.agent).not.toBeNull();
+    expect(agentRun.agent!.telemetry.stopReason).toBe('agent_stopped');
+
+    const agentSelected = agentRun.raw.files.filter((f) => f.selection_tier === 'selected');
+    // Agent narrows the scout candidate set.
+    expect(agentSelected.length).toBeLessThanOrEqual(scoutSelected.length);
+    expect(agentSelected).toHaveLength(1);
+    expect(agentSelected[0]!.path.endsWith('/src/request-handler.ts')).toBe(true);
+
+    // Normalize and confirm recommended_evidence reflects the narrower plan.
+    const normalized = normalizeRetrievalOutput({
+      raw: agentRun.raw,
+      repoRoot: tempDir,
+      intentCaptureId: 'i1',
+      intentRestatementId: 'r1',
+      intentSpecId: null,
+    });
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) return;
+
+    const rec = normalized.artifact.recommended_evidence;
+    expect(rec.files).toHaveLength(1);
+    expect(rec.files[0]!.include_ast_skeleton).toBe(true);
+    expect(rec.files[0]!.include_entire_file).toBe(false);
+    // The selected symbol carries a default span.
+    expect(rec.files[0]!.spans.length).toBeGreaterThan(0);
+    expect(rec.files[0]!.spans[0]!.include_span).toBe(true);
+    expect(rec.files[0]!.spans[0]!.neighbor_lines).toBe(2);
+  });
+});
