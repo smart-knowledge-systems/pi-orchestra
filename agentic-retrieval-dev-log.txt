@@ -22,3 +22,48 @@ Both active tasks are complete. Summary:
 **Verification**: `bunx tsc --noEmit` clean. `bun test` 378 pass / 2 fail — both failures (`tests/retriever/prompt.test.ts`) are pre-existing ("Tagged files:" vs "User-tagged files:") and unrelated to this work.
 
 **Nothing unfinished** within the scope of AR-P1-T1 and AR-P1-T2.
+
+===== 2026-04-17 | opus implement AR-P2 =====
+All three Sprint 2 tasks complete.
+
+**AR-P2-T1 — intent-files helper**: `src/util/intent-files.ts` already provided `extractIntentFiles` and `buildRestatementContext` with bounded byte/line budgets. Added `toIntentFileRefs()` to convert parsed files into `IntentFileRef[]` matching the artifact schema.
+
+**AR-P2-T2 — Stage 1 wiring**:
+- `RestateFunction` signature now takes `{ cleanedIntent, contextBlock? }` instead of a bare intent string.
+- `Stage1Controller.captureIntent` accepts an options object (`cleanedIntent`, `intentFileRefs`, `restatementContext`) and persists `cleaned_user_intent` + `intent_file_refs` on the capture artifact. Context block is retained in-memory for restatement and re-used across correction turns.
+- `submitApproval` correction path preserves `intent_file_refs` and tagged files from the prior capture (corrections are user-typed text with no inline `<file>` blocks).
+- `extensions/conductor-extension.ts`: `runPipelineFromIntent` now runs `buildRestatementContext(initialIntent, repoRoot)` before capture, passes cleaned intent + tagged files + refs to `captureIntent`, and hands the cleaned intent + bounded context block to `restateWithModel`. No new general repo-reading capability introduced — only files explicitly embedded in the initial user input are read (and only through the existing helper).
+
+**AR-P2-T3 — downstream cleaned-intent**:
+- `src/conductor/expansion.ts` stores `capture.cleaned_user_intent` in `ExpansionInputV1.user_intent_verbatim` so expansion prompts are no longer diluted by raw `<file>` blocks.
+- `src/services/retrieval-dispatch.ts` passes `capture.cleaned_user_intent` to `assembleRetrieverPrompt`.
+- `src/retriever/prompt.ts`: documented that callers must pass the cleaned intent; the prompt already refrains from embedding verbatim text in the query body.
+
+**Test updates**: `tests/interaction/stage-1.test.ts` and `tests/interaction/expansion-protocol.test.ts` `echoRestate` stubs updated to destructure `{ cleanedIntent }` per the new `RestateFunction` shape.
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 378 pass / 2 fail — both failures remain the pre-existing `tests/retriever/prompt.test.ts` "Tagged files:" vs "User-tagged files:" mismatch unrelated to this work.
+
+**Nothing unfinished** within the scope of AR-P2-T1/T2/T3.
+
+===== 2026-04-17T21:17:06Z | opus implement =====
+All three Sprint 2 tasks are complete.
+
+## Summary
+
+**AR-P2-T1** — Intent-files helper
+- `src/util/intent-files.ts`: helper already implemented with bounded byte/line budgets. Added `toIntentFileRefs()` to convert parsed files into `IntentFileRef[]` matching the v1 artifact schema.
+
+**AR-P2-T2** — Stage 1 wiring
+- `src/conductor/stage-1.ts`: `RestateFunction` now takes `{ cleanedIntent, contextBlock? }`. `captureIntent` accepts an options object (cleaned intent, file refs, restatement context) and persists `cleaned_user_intent` + `intent_file_refs`. Context is retained for corrections.
+- `extensions/conductor-extension.ts`: `runPipelineFromIntent` calls `buildRestatementContext` before capture; restatement model receives cleaned intent + bounded file context. No new general repo-reading capability.
+
+**AR-P2-T3** — Cleaned intent downstream
+- `src/conductor/expansion.ts`: expansion input now carries `capture.cleaned_user_intent`.
+- `src/services/retrieval-dispatch.ts`: retriever prompt assembled from cleaned intent.
+- `src/retriever/prompt.ts`: interface doc clarifies that callers pass cleaned intent.
+
+**Tests updated**: `tests/interaction/stage-1.test.ts` and `tests/interaction/expansion-protocol.test.ts` stubs adapted to new `RestateFunction` shape.
+
+**Verification**: `tsc --noEmit` clean. `bun test` 378 pass / 2 fail — both failures are the pre-existing `tests/retriever/prompt.test.ts` "Tagged files:" mismatch noted in the prior dev log, unrelated to this work.
+
+**Files modified**: `src/util/intent-files.ts`, `src/conductor/stage-1.ts`, `src/conductor/expansion.ts`, `src/services/retrieval-dispatch.ts`, `src/retriever/prompt.ts`, `extensions/conductor-extension.ts`, `tests/interaction/stage-1.test.ts`, `tests/interaction/expansion-protocol.test.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`. Nothing unfinished within the active-task scope.
