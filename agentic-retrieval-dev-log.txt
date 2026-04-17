@@ -437,3 +437,42 @@ Both active tasks complete.
 **Verification**: `bunx tsc --noEmit` clean; `bun test` 497 pass / 0 fail (up from 495, +2 new tests).
 
 Nothing unfinished in the active-task scope. AR-P8-T4 remains `planned`, as it was not in the active set.
+
+===== 2026-04-17T22:55:36Z | opus implement AR-P8-T4 =====
+Reconciled override documentation with the actual plan + assembler semantics that landed in AR-P7-T4 / AR-P7-T5.
+
+**Docs updated**
+- `docs/specification/03-prompts-and-protocol.md` § 10.2: each override op now documents its exact semantics — `promote_file` seeds spans from `recommended_evidence` / `selected_by_default` symbols and throws without a seed; `set_file_mode` clears spans on `summary`/`summary+ast` and splices out on `exclude`; `spans`/`whole_file` preserve spans. Added a trailing paragraph noting the assembler materializes raw spans from `planFile.spans.filter(include_span)` independent of the file-level flags, which is why the overrides module must clear spans. § 10.3 gained mode-specific guidance for spans-mode promotion, narrow-via-summary, and exclude-then-repromote.
+- `docs/specification/00-overview.md` Stage 4: added a short semantics block covering the same two load-bearing behaviors without duplicating 03's detail.
+- `docs/conductor-overview.md` Evidence planning: split the generic op list from a new "load-bearing" block explaining `promote_file` mode=spans seeding, `set_file_mode` summary-clears-spans, and `set_file_mode` exclude-removes-file. The rejection paragraph now mentions missing span seeds as a rejection cause.
+
+**Code terminology aligned**
+- `src/conductor/evidence-overrides.ts`: module header now names the two semantic rules explicitly and points at the assembler as the reason for the span-clearing behavior.
+- `src/services/evidence-assembler.ts`: added a 3-line comment above `enabledSpans = planFile.spans.filter(...)` documenting that file-level summary / AST flags do not suppress spans and pointing at `evidence-overrides.ts` for the corresponding clear/splice behavior.
+
+**What was NOT touched**
+- `docs/specification/01-artifacts-and-schemas.md` (not in the active-task file list and already accurate — it only enumerates the ops, no mode-specific claims to reconcile).
+- `docs/specification/02-pi-architecture.md` (not in the active-task file list; its override examples don't make mode-semantic claims that the implementation contradicts).
+- `OVERRIDE_HELP` in `extensions/conductor-extension.ts` (already reflects the correct semantics — it was updated in AR-P7-T4/T5).
+
+**Verification**: `bunx tsc --noEmit` clean. `bun test` 497 pass / 0 fail (no test changes; docs + comments only).
+
+**Files modified**: `docs/specification/00-overview.md`, `docs/specification/03-prompts-and-protocol.md`, `docs/conductor-overview.md`, `src/conductor/evidence-overrides.ts`, `src/services/evidence-assembler.ts`, `agentic-retrieval-tasks.json`, `agentic-retrieval-dev-log.txt`.
+
+AR-P8-T4 flipped to `completed`. All AR-P1 through AR-P8 tasks are now closed.
+
+===== 2026-04-17T22:56:07Z | opus implement =====
+AR-P8-T4 complete. Summary:
+
+**Docs updated** to state the actual override semantics from AR-P7-T4 / AR-P7-T5:
+- `docs/specification/03-prompts-and-protocol.md` § 10.2 / 10.3 — per-op semantics, `promote_file` spans-mode seeding + throw behavior, `set_file_mode` span-clearing on summary modes, exclude-removes-file, plus a paragraph explaining why the assembler forces span-clearing.
+- `docs/specification/00-overview.md` Stage 4 — short semantics block pointing at the two load-bearing behaviors.
+- `docs/conductor-overview.md` Evidence planning — new block documenting the three surprising rules; rejection paragraph now includes missing span seeds.
+
+**Code terminology aligned**:
+- `src/conductor/evidence-overrides.ts` — module header spells out the two semantic rules and names the assembler as the reason.
+- `src/services/evidence-assembler.ts` — short comment at `enabledSpans = planFile.spans.filter(...)` explains flag independence and cross-references the overrides module.
+
+**Verification**: `bunx tsc --noEmit` clean; `bun test` 497 pass / 0 fail (docs + comments only; no test changes).
+
+Task flipped to `completed` in `agentic-retrieval-tasks.json`; dev-log entry appended. No unfinished work — AR-P1 through AR-P8 are all closed.

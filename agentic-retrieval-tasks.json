@@ -547,7 +547,7 @@
         "src/services/evidence-assembler.ts"
       ],
       "dependencies": ["AR-P7-T4", "AR-P7-T5", "AR-P8-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Documentation no longer claims override mode behavior that the current plan and assembler pipeline do not actually honor",
         "promote_file and set_file_mode examples match implemented semantics, including span materialization behavior",
