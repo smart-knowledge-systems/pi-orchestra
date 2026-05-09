@@ -164,7 +164,7 @@
       "deliverable": "Stage machine that derives transitions from the workflow spec rather than encoding them",
       "files": ["src/conductor/stage-machine.ts"],
       "dependencies": ["COMP-P1-T7"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "stage-machine.ts no longer contains a static transition map",
         "All existing stage-machine tests pass with transitions derived from piorx-default.workflow.md",
@@ -198,7 +198,7 @@
       "deliverable": "Pipeline orchestration driven by the workflow spec, no longer encoded inline",
       "files": ["extensions/conductor-extension.ts"],
       "dependencies": ["COMP-P1-T7", "COMP-P1-T8", "COMP-P1-T10"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "runPipelineFromIntent is a thin call into the workflow executor",
         "All conductor-extension tests pass without behavior drift",
