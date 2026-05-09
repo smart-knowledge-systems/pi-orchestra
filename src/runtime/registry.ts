@@ -30,7 +30,7 @@
 import { ARTIFACT_TYPES, type ArtifactType, type WorkflowSpecV1 } from '../artifacts/types.ts';
 import { validateArtifact } from '../artifacts/schemas.ts';
 import { evidenceReviewGate } from '../conductor/evidence-overrides.ts';
-import type { GateSpec } from './gate.ts';
+import type { GateOp, GateOpValidation, GateSpec } from './gate.ts';
 import type { Stage } from './stage.ts';
 
 // ---------------------------------------------------------------------------
@@ -533,6 +533,86 @@ export class WorkflowRegistry {
  */
 export function registerDefaultGates(registry: WorkflowRegistry): void {
   registry.registerGate('evidence', evidenceReviewGate);
+}
+
+// ---------------------------------------------------------------------------
+// Opt-in gate registration — synthesis.advisor-review (COMP-P3-T2)
+// ---------------------------------------------------------------------------
+//
+// The `synthesis.advisor-review` gate is the canonical example of gate
+// composition by stage id (per `docs/composability.md` "Phase 3"): an
+// extension can register an additional gate against the synthesis stage
+// alongside the platform's `synthesis.confirm-task-type` mandatory control,
+// and the executor will run them in registration order.
+//
+// The gate is **opt-in and off by default**. The default workflow spec
+// (`src/runtime/workflows/piorx-default.workflow.md`) does not list
+// `synthesis.advisor-review` in `stages.synthesis.gates`, so the registry's
+// boot-time `validate()` does not require an implementation to be
+// registered. Hosts that enable advisor-aware synthesis (Phase 3+) call
+// `registerSynthesisAdvisorReviewGate(registry)` AFTER `registerWorkflow`
+// to attach the gate without modifying the spec.
+//
+// The default broker (`src/runtime/workflow-executor.ts`) auto-accepts gate
+// outcomes when no host UI is wired, so registering this gate without a UI
+// does not change runtime behavior — it surfaces in lineage as an
+// `accepted` gate decision and nothing else. That keeps the byte-identical
+// Phase 2 path intact for hosts that opt in to the gate but have not yet
+// surfaced an advisor-review surface to the user.
+
+export const SYNTHESIS_ADVISOR_REVIEW_GATE_ID = 'synthesis.advisor-review';
+
+/** Trivial no-op `GateOp` accepted by `synthesisAdvisorReviewGate`. */
+export interface SynthesisAdvisorReviewOp extends GateOp {
+  readonly op: 'noop';
+}
+
+/**
+ * `synthesis.advisor-review` — opt-in advisor-review gate.
+ *
+ * Sibling of `synthesis.confirm-task-type`, registered against the same
+ * `synthesis` stage id. Today it presents an empty review surface and
+ * accepts no concrete override ops — its purpose at Phase 3 is to **prove
+ * gate composition by stage id**: the executor walks both gates in
+ * registration order, the lineage records both decisions, and an extension
+ * that swaps in a richer presents/applyOverride implementation needs no
+ * registry changes to do so.
+ */
+export const synthesisAdvisorReviewGate: GateSpec<SynthesisAdvisorReviewOp> = {
+  id: SYNTHESIS_ADVISOR_REVIEW_GATE_ID,
+
+  async presents() {
+    return {
+      summary: 'synthesis.advisor-review: no advisor-review surface attached (opt-in gate).',
+    };
+  },
+
+  validateOverride(op: SynthesisAdvisorReviewOp): GateOpValidation {
+    if (op.op !== 'noop') {
+      return { valid: false, errors: [`synthesis.advisor-review: unsupported op "${op.op}"`] };
+    }
+    return { valid: true, errors: [] };
+  },
+
+  async applyOverride(): Promise<void> {
+    // No-op: the gate is opt-in and the default implementation does not
+    // mutate the synthesis artifact. Extensions that need to mutate state
+    // register their own `GateSpec` instead of replacing this one.
+  },
+};
+
+/**
+ * Register the opt-in `synthesis.advisor-review` gate.
+ *
+ * Hosts that enable advisor-aware synthesis call this AFTER
+ * `registerWorkflow` so the executor walks both `synthesis.confirm-task-
+ * type` and `synthesis.advisor-review` in registration order. Calling it
+ * without enabling advisor wiring is harmless — the default broker auto-
+ * accepts the gate and lineage records the decision; runtime behavior is
+ * byte-identical to the gate-disabled path.
+ */
+export function registerSynthesisAdvisorReviewGate(registry: WorkflowRegistry): void {
+  registry.registerGate('synthesis', synthesisAdvisorReviewGate);
 }
 
 // ---------------------------------------------------------------------------
