@@ -916,13 +916,15 @@ describe('WorkflowExecutor — sub-workflow descent (workflow_ref + inline workf
     expect(result.stage_runs.map((r) => r.stage_id)).toEqual(['wrap']);
     expect(result.final_stage_id).toBe('wrap');
     expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
-    // Lineage shows the sub-workflow's stage entry carries the sub-spec id,
-    // while the parent stage's lineage entry carries the host spec id.
+    // Lineage records the parent stage entry at the top level, with the
+    // sub-workflow's stage entry nested under `sub_lineage` so an audit
+    // walker can reconstruct the parent/child hierarchy (COMP-P7-T3).
     const lineage = executor.sessionState.lineage;
-    const subEntry = lineage.find((e) => e.stage_id === 'inner-capture');
-    expect(subEntry?.workflow_spec_id).toBe('test/sub-workflow@1');
-    const parentEntry = lineage.find((e) => e.stage_id === 'wrap');
+    expect(lineage.map((e) => e.stage_id)).toEqual(['wrap']);
+    const parentEntry = lineage[0];
     expect(parentEntry?.workflow_spec_id).toBe('test/host-with-sub@1');
+    const subEntry = parentEntry?.sub_lineage?.find((e) => e.stage_id === 'inner-capture');
+    expect(subEntry?.workflow_spec_id).toBe('test/sub-workflow@1');
   });
 
   test('workflow_ref descends through the registry and produces the same final artifact', async () => {
@@ -960,12 +962,11 @@ describe('WorkflowExecutor — sub-workflow descent (workflow_ref + inline workf
     expect(result.final_stage_id).toBe('wrap');
     expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
     const lineage = executor.sessionState.lineage;
-    expect(lineage.find((e) => e.stage_id === 'inner-capture')?.workflow_spec_id).toBe(
-      'test/sub-workflow@1',
-    );
-    expect(lineage.find((e) => e.stage_id === 'wrap')?.workflow_spec_id).toBe(
-      'test/host-with-sub@1',
-    );
+    expect(lineage.map((e) => e.stage_id)).toEqual(['wrap']);
+    const parentEntry = lineage[0];
+    expect(parentEntry?.workflow_spec_id).toBe('test/host-with-sub@1');
+    const subEntry = parentEntry?.sub_lineage?.find((e) => e.stage_id === 'inner-capture');
+    expect(subEntry?.workflow_spec_id).toBe('test/sub-workflow@1');
   });
 
   test('sub-workflow gates run during descent; parent gates run after the sub-workflow returns', async () => {
@@ -1071,5 +1072,393 @@ describe('WorkflowExecutor — __exit__ virtual edge target', () => {
     // The originating stage's output is the workflow's final artifact.
     expect(result.final_stage_id).toBe('restate');
     expect(result.final_artifact_type).toBe('piorx/intent-restatement@1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P7-T3 — sub-workflow stage-id namespacing + lineage sub-tree
+// ---------------------------------------------------------------------------
+
+describe('WorkflowExecutor — sub-workflow stage-id namespacing (COMP-P7-T3)', () => {
+  /**
+   * Build a host spec where the parent stage `capture` has a sub-workflow
+   * whose only stage is also called `capture`. Without namespacing, the
+   * sub-workflow's `capture` would resolve to the top-level `captureStage`
+   * adapter — the test below proves the registry resolves it under the
+   * namespaced id `capture.capture` and uses the dedicated sub adapter.
+   */
+  function buildCollidingSpec(): WorkflowSpecV1 {
+    const subBody = {
+      id: 'test/colliding-sub@1',
+      name: 'Colliding Sub',
+      description: 'sub-workflow whose stage id collides with the parent',
+      goals: ['exercise collision avoidance'],
+      operating_mode: 'supervised-change' as const,
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'capture',
+          name: 'Inner capture',
+          description: 'sub-stage whose id collides with the parent',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'capture',
+    };
+    return {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: generateArtifactId('piorx/workflow-spec@1'),
+      id: 'test/colliding-host@1',
+      name: 'Colliding host',
+      description: 'parent whose stage id collides with the sub-workflow stage id',
+      goals: ['exercise collision avoidance'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'capture',
+          name: 'Outer capture',
+          description: 'parent stage that descends into a sub-workflow',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+          workflow: subBody,
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'capture',
+    };
+  }
+
+  test('sub-workflow stages register under namespaced ids without colliding with parent stages', async () => {
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildCollidingSpec());
+
+    // Two distinct adapters with the SAME logical id but different roles.
+    // The sub adapter is registered under the namespaced id `capture.capture`.
+    let topLevelInvocations = 0;
+    let subWorkflowInvocations = 0;
+    const topAdapter: Stage = {
+      ...captureStage(),
+      id: 'capture',
+      async run(ctx: StageContext): Promise<StageResult> {
+        topLevelInvocations += 1;
+        return captureStage().run(ctx);
+      },
+    };
+    const subAdapter: Stage = {
+      ...captureStage(),
+      id: 'capture.capture',
+      async run(ctx: StageContext): Promise<StageResult> {
+        subWorkflowInvocations += 1;
+        return captureStage().run(ctx);
+      },
+    };
+    registry.registerStage(topAdapter);
+    registry.registerStage(subAdapter);
+
+    const { executor } = buildExecutor({ registry });
+    await executor.run('test/colliding-host@1');
+
+    // The PARENT stage descends into the sub-workflow (it does NOT call its
+    // own Stage.run); only the sub adapter should fire under the namespaced id.
+    expect(topLevelInvocations).toBe(0);
+    expect(subWorkflowInvocations).toBe(1);
+    // The registry resolves both ids independently.
+    expect(registry.resolveStage('capture')).toBe(topAdapter);
+    expect(registry.resolveStage('capture', 'capture')).toBe(subAdapter);
+  });
+
+  test('namespaced lookup falls back to bare id when no namespaced adapter is registered', () => {
+    const registry = new WorkflowRegistry();
+    const adapter = captureStage();
+    registry.registerStage(adapter);
+    // No `capture.capture` adapter registered; lookup falls back to bare.
+    expect(registry.resolveStage('capture', 'capture')).toBe(adapter);
+  });
+
+  test('audit walker can reconstruct the parent/child workflow hierarchy from lineage alone', async () => {
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildCollidingSpec());
+    registry.registerStage({ ...captureStage(), id: 'capture' });
+    registry.registerStage({ ...captureStage(), id: 'capture.capture' });
+    const { executor } = buildExecutor({ registry });
+    await executor.run('test/colliding-host@1');
+
+    interface HierarchyNode {
+      stage_id: string;
+      workflow_spec_id: string | undefined;
+      children: HierarchyNode[];
+    }
+    function walk(entries: readonly LineageEntryLike[]): HierarchyNode[] {
+      return entries.map((entry) => ({
+        stage_id: entry.stage_id ?? entry.stage,
+        workflow_spec_id: entry.workflow_spec_id,
+        children: entry.sub_lineage ? walk(entry.sub_lineage) : [],
+      }));
+    }
+
+    const tree = walk(executor.sessionState.lineage);
+    expect(tree).toEqual([
+      {
+        stage_id: 'capture',
+        workflow_spec_id: 'test/colliding-host@1',
+        children: [
+          {
+            stage_id: 'capture',
+            workflow_spec_id: 'test/colliding-sub@1',
+            children: [],
+          },
+        ],
+      },
+    ]);
+  });
+});
+
+// Local mirror of LineageEntry-shaped fields used by the audit-walker test.
+// Keeps the test independent of `import type`-only changes to the canonical
+// LineageEntry while still exercising the sub_lineage tree shape.
+interface LineageEntryLike {
+  stage: string;
+  stage_id?: string;
+  workflow_spec_id?: string;
+  sub_lineage?: LineageEntryLike[];
+}
+
+// ---------------------------------------------------------------------------
+// COMP-P7-T4 — end-to-end coverage for sub-workflow execution
+// ---------------------------------------------------------------------------
+
+describe('WorkflowExecutor — sub-workflow E2E (COMP-P7-T4)', () => {
+  function buildSubWorkflowSpec(args: {
+    id: string;
+    stages: WorkflowSpecV1['stages'];
+    edges?: WorkflowSpecV1['edges'];
+    recursive_promotion_target: string;
+  }): WorkflowSpecV1 {
+    return {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: generateArtifactId('piorx/workflow-spec@1'),
+      id: args.id,
+      name: 'E2E sub-workflow',
+      description: 'sub-workflow used by COMP-P7-T4 end-to-end coverage',
+      goals: ['exercise sub-workflow descent end-to-end'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: [],
+      stages: args.stages,
+      edges: args.edges ?? [],
+      recursive_promotion_target: args.recursive_promotion_target,
+    };
+  }
+
+  function buildHostSpec(args: {
+    id: string;
+    parentStage: { workflow_ref?: string; workflow?: WorkflowSpecV1 };
+    output: string;
+  }): WorkflowSpecV1 {
+    return {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: generateArtifactId('piorx/workflow-spec@1'),
+      id: args.id,
+      name: 'E2E host',
+      description: 'host workflow used by COMP-P7-T4 end-to-end coverage',
+      goals: ['delegate to sub-workflow'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'host',
+          name: 'Host stage',
+          description: 'parent stage that delegates to the sub-workflow',
+          inputs: [],
+          output: args.output,
+          model_class: 'noop',
+          ...(args.parentStage.workflow_ref ? { workflow_ref: args.parentStage.workflow_ref } : {}),
+          ...(args.parentStage.workflow
+            ? // Strip the artifact-base fields when embedding inline. The
+              // executor's `materializeInlineSpec` re-attaches them.
+              {
+                workflow: {
+                  id: args.parentStage.workflow.id,
+                  name: args.parentStage.workflow.name,
+                  description: args.parentStage.workflow.description,
+                  goals: args.parentStage.workflow.goals,
+                  operating_mode: args.parentStage.workflow.operating_mode,
+                  mandatory_controls: args.parentStage.workflow.mandatory_controls,
+                  stages: args.parentStage.workflow.stages,
+                  edges: args.parentStage.workflow.edges,
+                  recursive_promotion_target: args.parentStage.workflow.recursive_promotion_target,
+                },
+              }
+            : {}),
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'host',
+    };
+  }
+
+  test('inline workflow: produces the sub-workflow final artifact end-to-end', async () => {
+    const subSpec = buildSubWorkflowSpec({
+      id: 'test/e2e-inline-sub@1',
+      stages: [
+        {
+          id: 'inner',
+          name: 'inner',
+          description: 'inner stage',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+      ],
+      recursive_promotion_target: 'inner',
+    });
+    const hostSpec = buildHostSpec({
+      id: 'test/e2e-inline-host@1',
+      parentStage: { workflow: subSpec },
+      output: 'piorx/intent-capture@1',
+    });
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(hostSpec);
+    registry.registerStage({ ...captureStage(), id: 'host.inner' });
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run('test/e2e-inline-host@1');
+    expect(result.final_stage_id).toBe('host');
+    expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
+    // The final artifact id is what the sub-workflow produced — the parent
+    // stage simply surfaces it.
+    const finalArtifact = await store.get('piorx/intent-capture@1', result.final_artifact_id);
+    expect(finalArtifact?.artifact_id).toBe(result.final_artifact_id);
+  });
+
+  test('workflow_ref: produces identical behavior to inline descent', async () => {
+    const subSpec = buildSubWorkflowSpec({
+      id: 'test/e2e-ref-sub@1',
+      stages: [
+        {
+          id: 'inner',
+          name: 'inner',
+          description: 'inner stage',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+      ],
+      recursive_promotion_target: 'inner',
+    });
+    const hostSpec = buildHostSpec({
+      id: 'test/e2e-ref-host@1',
+      parentStage: { workflow_ref: 'test/e2e-ref-sub@1' },
+      output: 'piorx/intent-capture@1',
+    });
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(subSpec);
+    registry.registerWorkflow(hostSpec);
+    // Bare-id Stage adapter — workflow_ref descent's namespaced lookup falls
+    // back to the bare id when no `host.inner` adapter is registered, so a
+    // registered top-level workflow can be referenced unchanged.
+    registry.registerStage({ ...captureStage(), id: 'inner' });
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run('test/e2e-ref-host@1');
+    expect(result.final_stage_id).toBe('host');
+    expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
+  });
+
+  test('__exit__ early-exit inside a sub-workflow surfaces the early-exit stage output as the final artifact', async () => {
+    // Sub-workflow with two stages: `inner-a` produces an intent-capture and
+    // immediately routes to __exit__, so `inner-b` is never reached. The
+    // early-exit stage's output becomes the sub-workflow's final artifact,
+    // which the parent stage then surfaces as its own output.
+    const subSpec = buildSubWorkflowSpec({
+      id: 'test/e2e-exit-sub@1',
+      stages: [
+        {
+          id: 'inner-a',
+          name: 'inner a',
+          description: 'early-exit stage',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+        {
+          id: 'inner-b',
+          name: 'inner b',
+          description: 'never reached',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'noop',
+        },
+      ],
+      edges: [{ from: 'inner-a', to: '__exit__', description: 'early-exit at inner-a' }],
+      recursive_promotion_target: 'inner-a',
+    });
+    const hostSpec = buildHostSpec({
+      id: 'test/e2e-exit-host@1',
+      parentStage: { workflow: subSpec },
+      output: 'piorx/intent-capture@1',
+    });
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(hostSpec);
+    registry.registerStage({ ...captureStage(), id: 'host.inner-a' });
+    // Register `inner-b` adapter too so a regression that ignores __exit__
+    // would walk into it (and likely fail when its restate adapter doesn't
+    // align with the host stage's declared output type).
+    registry.registerStage({
+      ...restateStage(),
+      id: 'host.inner-b',
+    });
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run('test/e2e-exit-host@1');
+    expect(result.final_stage_id).toBe('host');
+    // Sub-workflow exits at inner-a, so the final artifact is intent-capture
+    // (not intent-restatement). The parent stage surfaces it.
+    expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
+
+    // sub_lineage records only `inner-a` — `inner-b` never ran.
+    const lineage = executor.sessionState.lineage;
+    expect(lineage.length).toBe(1);
+    expect(lineage[0]?.sub_lineage?.map((e) => e.stage_id)).toEqual(['inner-a']);
+  });
+
+  test('lineage assertion: sub-workflow stage runs appear as a sub-tree of the parent stage entry', async () => {
+    const subSpec = buildSubWorkflowSpec({
+      id: 'test/e2e-tree-sub@1',
+      stages: [
+        {
+          id: 'inner',
+          name: 'inner',
+          description: 'inner stage',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+      ],
+      recursive_promotion_target: 'inner',
+    });
+    const hostSpec = buildHostSpec({
+      id: 'test/e2e-tree-host@1',
+      parentStage: { workflow: subSpec },
+      output: 'piorx/intent-capture@1',
+    });
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(hostSpec);
+    registry.registerStage({ ...captureStage(), id: 'host.inner' });
+
+    const { executor } = buildExecutor({ registry });
+    await executor.run('test/e2e-tree-host@1');
+
+    const lineage = executor.sessionState.lineage;
+    // Parent appears at top level; sub-stage appears NESTED, not flat.
+    expect(lineage.map((e) => e.stage_id)).toEqual(['host']);
+    const parent = lineage[0];
+    expect(parent?.workflow_spec_id).toBe('test/e2e-tree-host@1');
+    expect(parent?.sub_lineage?.map((e) => e.stage_id)).toEqual(['inner']);
+    expect(parent?.sub_lineage?.[0]?.workflow_spec_id).toBe('test/e2e-tree-sub@1');
   });
 });
