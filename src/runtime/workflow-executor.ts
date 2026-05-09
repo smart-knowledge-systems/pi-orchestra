@@ -27,7 +27,7 @@
  * ops — sufficient for tests that exercise the flow without a UI.
  */
 
-import type { ArtifactStore } from '../artifacts/store.ts';
+import { ArtifactStoreError, type ArtifactStore } from '../artifacts/store.ts';
 import {
   ARTIFACT_TYPES,
   type Artifact,
@@ -643,8 +643,21 @@ export class WorkflowExecutor {
     for (const candidate of candidates) {
       if (!KNOWN_ARTIFACT_TYPES.has(candidate)) continue;
       const type = candidate as ArtifactType;
-      const artifact = await this.store.get(type, result.output_artifact_id);
-      if (artifact) return { artifact, type };
+      try {
+        const artifact = await this.store.get(type, result.output_artifact_id);
+        if (artifact) return { artifact, type };
+      } catch (err) {
+        // Union outputs that share an on-disk subdirectory (analysis-report
+        // and change-spec both live under `synthesis/`) cause `store.get`
+        // to load the file but throw a type-mismatch when the produced
+        // artifact's `artifact_type` is a different member of the union.
+        // Fall through to the next candidate so the executor can pick the
+        // matching type without coupling to path layout.
+        if (err instanceof ArtifactStoreError && err.message.startsWith('Type mismatch')) {
+          continue;
+        }
+        throw err;
+      }
     }
     throw new WorkflowExecutorError(
       `stage "${stageSpec.id}": produced artifact "${result.output_artifact_id}" did not resolve as any of [${candidates.join(', ')}]`,
