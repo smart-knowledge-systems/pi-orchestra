@@ -23,9 +23,11 @@ import {
   ADVISOR_DISABLE_ENV,
   type AdvisorCallback,
   type AdvisorTelemetry,
+  type AdvisorToolResult,
   type ExecutorCallback,
   type ExecutorRequest,
   isAdvisorDisabledByEnv,
+  runAdvisorTool,
   runWithAdvisor,
 } from '../../src/runtime/run-with-advisor.ts';
 
@@ -776,5 +778,207 @@ describe('runWithAdvisor — Phase 2 gate (COMP-P2-T4)', () => {
       expect(t.advisor_output_tokens).toBe(0);
       expect(t.beta_header_sent).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runAdvisorTool — piorx:advisor pi-tool seam (COMP-P5-T1)
+// ---------------------------------------------------------------------------
+
+const ADVISOR_TOOL_DETAIL_KEYS = [
+  'advisorModel',
+  'effort',
+  'usage',
+  'stopReason',
+  'errorMessage',
+] as const;
+
+function expectWireCompatShape(result: AdvisorToolResult): void {
+  expect(Array.isArray(result.content)).toBe(true);
+  for (const part of result.content) {
+    expect(part.type).toBe('text');
+    expect(typeof part.text).toBe('string');
+  }
+  const detailKeys = Object.keys(result.details).sort();
+  expect(detailKeys).toEqual([...ADVISOR_TOOL_DETAIL_KEYS].sort());
+}
+
+describe('runAdvisorTool — wire-compat with rpiv-advisor', () => {
+  test('success path returns rpiv-advisor wire shape with end_turn stop reason', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'recommendation', usage: { input_tokens: 42, output_tokens: 7 } });
+
+    const result = await runAdvisorTool({
+      request: {
+        systemPrompt: 'sys',
+        userMessage: 'review',
+        advisorModel: 'claude-opus-4-7',
+        effort: 'high',
+      },
+      advisor: advisor.callback,
+    });
+
+    expectWireCompatShape(result);
+    expect(result.content).toEqual([{ type: 'text', text: 'recommendation' }]);
+    expect(result.details.advisorModel).toBe('claude-opus-4-7');
+    expect(result.details.effort).toBe('high');
+    expect(result.details.usage).toEqual({ inputTokens: 42, outputTokens: 7 });
+    expect(result.details.stopReason).toBe('end_turn');
+    expect(result.details.errorMessage).toBeNull();
+    expect(advisor.calls).toHaveLength(1);
+    expect(advisor.calls[0]).toEqual({ systemPrompt: 'sys', userMessage: 'review' });
+  });
+
+  test('zero-arg invocation: caller supplies systemPrompt + userMessage; tool params stay empty', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'plan', usage: { input_tokens: 1, output_tokens: 2 } });
+
+    // The pi tool itself takes zero args — the host always synthesizes
+    // systemPrompt/userMessage. Here we assert the seam doesn't reach into
+    // any extra positional state and only consumes what the request supplies.
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 'host-sys', userMessage: 'host-user', advisorModel: 'opus' },
+      advisor: advisor.callback,
+    });
+
+    expect(advisor.calls[0]?.systemPrompt).toBe('host-sys');
+    expect(advisor.calls[0]?.userMessage).toBe('host-user');
+    expect(result.details.stopReason).toBe('end_turn');
+  });
+
+  test('missing usage on advisor response surfaces details.usage = null', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'no-usage' });
+    // Override callback to drop usage entirely.
+    const stripped: AdvisorCallback = async () => ({ text: 'no-usage' });
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: stripped,
+    });
+    expect(result.details.usage).toBeNull();
+    expect(result.details.stopReason).toBe('end_turn');
+  });
+
+  test('advisor returns errorCode → stopReason=error, errorMessage propagated', async () => {
+    const advisor: AdvisorCallback = async () => ({ text: '', errorCode: 'max_uses_exceeded' });
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor,
+    });
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toBe('max_uses_exceeded');
+  });
+
+  test('advisor callback throws → stopReason=error, errorMessage carries thrown message', async () => {
+    const advisor: AdvisorCallback = async () => {
+      throw new Error('boom');
+    };
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor,
+    });
+    expectWireCompatShape(result);
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toBe('boom');
+    expect(result.content).toEqual([{ type: 'text', text: '' }]);
+  });
+
+  test('aborted signal short-circuits with stopReason=aborted before dispatch', async () => {
+    const advisor = makeStubAdvisor();
+    const ctl = new AbortController();
+    ctl.abort();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+      signal: ctl.signal,
+    });
+    expect(advisor.calls).toHaveLength(0);
+    expect(result.details.stopReason).toBe('aborted');
+    expect(result.details.errorMessage).toContain('aborted');
+  });
+
+  test('signal aborted during advisor call → stopReason=aborted on thrown error', async () => {
+    const ctl = new AbortController();
+    const advisor: AdvisorCallback = async () => {
+      ctl.abort();
+      throw new Error('aborted by host');
+    };
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor,
+      signal: ctl.signal,
+    });
+    expect(result.details.stopReason).toBe('aborted');
+    expect(result.details.errorMessage).toBe('aborted by host');
+  });
+
+  test('PIORX_DISABLE_ADVISOR=1 short-circuits without calling advisor', async () => {
+    const advisor = makeStubAdvisor();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+      env: { [ADVISOR_DISABLE_ENV]: '1' },
+    });
+    expect(advisor.calls).toHaveLength(0);
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toContain('PIORX_DISABLE_ADVISOR');
+  });
+
+  test('logEvent records canonical telemetry shape on every path', async () => {
+    const events: Array<{ message: string; details: unknown }> = [];
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'ok', usage: { input_tokens: 5, output_tokens: 3 } });
+
+    await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: advisor.callback,
+      logEvent: async (message, details) => {
+        events.push({ message, details });
+      },
+    });
+    // Same logEvent on the env-disabled path
+    await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: advisor.callback,
+      env: { [ADVISOR_DISABLE_ENV]: '1' },
+      logEvent: async (message, details) => {
+        events.push({ message, details });
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.message).toBe('runtime.advisor_tool');
+      const details = event.details as Record<string, unknown>;
+      expect(Object.keys(details).sort()).toEqual(
+        [
+          'advisor_input_tokens',
+          'advisor_model',
+          'advisor_output_tokens',
+          'disabled_by_env',
+          'effort',
+          'error_message',
+          'stop_reason',
+        ].sort(),
+      );
+    }
+    const successDetails = events[0]!.details as Record<string, unknown>;
+    expect(successDetails.stop_reason).toBe('end_turn');
+    expect(successDetails.disabled_by_env).toBe(false);
+    expect(successDetails.advisor_input_tokens).toBe(5);
+
+    const disabledDetails = events[1]!.details as Record<string, unknown>;
+    expect(disabledDetails.stop_reason).toBe('error');
+    expect(disabledDetails.disabled_by_env).toBe(true);
+    expect(disabledDetails.advisor_input_tokens).toBe(0);
+  });
+
+  test('effort defaults to null when caller does not supply one', async () => {
+    const advisor = makeStubAdvisor();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+    });
+    expect(result.details.effort).toBeNull();
   });
 });

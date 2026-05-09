@@ -18,6 +18,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { complete, type UserMessage } from '@mariozechner/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { ArtifactStore } from '../src/artifacts/store.ts';
 import { runDefaultPipeline } from '../src/conductor/default-pipeline.ts';
 import { StageMachine } from '../src/conductor/stage-machine.ts';
@@ -28,6 +29,12 @@ import {
   type PiOrchestraConfig,
   type PipelinePhaseId,
 } from '../src/runtime/config.ts';
+import {
+  runAdvisorTool,
+  type AdvisorCallback,
+  type AdvisorToolDetails,
+  type AdvisorToolResult,
+} from '../src/runtime/run-with-advisor.ts';
 import type { AgentModelCallback } from '../src/retriever/agent-types.ts';
 
 type OrchestraRuntime = {
@@ -202,6 +209,162 @@ function makePipelineUI(ctx: ExtensionContext) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// piorx:advisor pi tool — wire-compat with rpiv-advisor (COMP-P5-T1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Phase the advisor tool resolves its model from when invoked outside any
+ * active stage. The synthesis phase is the canonical advisor-aware phase
+ * declared by `piorx-default.workflow.md` and wired in Phase 3, so its
+ * advisor configuration drives the interactive tool by default. Hosts that
+ * want a different default route a different phase id at registration time.
+ */
+const ADVISOR_TOOL_DEFAULT_PHASE: PipelinePhaseId = 'synthesis';
+
+const ADVISOR_TOOL_DEFAULT_USER_MESSAGE =
+  'Review the current pi-orchestra session and surface plan, correction, or stop guidance.';
+
+/**
+ * Tool name registered with pi. The design doc and task brief both use the
+ * `piorx:advisor` identifier; Anthropic's Messages API restricts tool names
+ * to `[a-zA-Z0-9_-]{1,64}`, so the on-the-wire name is `piorx_advisor`. The
+ * underscore substitution preserves the identity ("piorx-namespaced advisor")
+ * while staying provider-portable. Wire compatibility with rpiv-advisor is in
+ * the result shape (`{ content, details: { advisorModel, effort, usage,
+ * stopReason, errorMessage } }`), not the tool name — rpiv-advisor itself
+ * registers as `advisor`, so any consumer matching tool name is already
+ * coupled to one implementation.
+ */
+const PIORX_ADVISOR_TOOL_NAME = 'piorx_advisor';
+
+const ADVISOR_TOOL_DESCRIPTION = [
+  'Consult the piorx advisor for plan, correction, or stop guidance.',
+  'Zero-argument call: the advisor reads the active conversation context and',
+  'returns its recommendation. Returns the rpiv-advisor wire shape',
+  '({ content, details: { advisorModel, effort, usage, stopReason,',
+  'errorMessage } }) so existing rpiv-advisor consumers are drop-in compatible.',
+].join(' ');
+
+function makeAdvisorErrorToolResult(
+  advisorModel: string | null,
+  effort: AdvisorToolDetails['effort'],
+  message: string,
+  stopReason: AdvisorToolDetails['stopReason'] = 'error',
+): AdvisorToolResult {
+  return {
+    content: [{ type: 'text', text: '' }],
+    details: {
+      advisorModel,
+      effort,
+      usage: null,
+      stopReason,
+      errorMessage: message,
+    },
+  };
+}
+
+function thinkingLevelToEffort(level: string | undefined): AdvisorToolDetails['effort'] {
+  if (level === 'high' || level === 'medium' || level === 'low') return level;
+  return null;
+}
+
+/**
+ * Build the advisor `complete()` callback used by the `piorx_advisor` pi
+ * tool. Resolves the advisor model from the model registry, fetches the API
+ * key, and adapts pi-ai's `complete()` shape onto the
+ * `AdvisorCallback` contract `runAdvisorTool` consumes.
+ *
+ * Returns `null` when the host has not configured an advisor for the
+ * resolution phase — the caller surfaces an `errorMessage` on the
+ * wire-compat result rather than throwing.
+ */
+async function buildAdvisorCallback(
+  ctx: ExtensionContext,
+  phase: PipelinePhaseId,
+  thinkingLevel: string | undefined,
+): Promise<
+  | {
+      kind: 'ok';
+      advisorModel: string;
+      effort: AdvisorToolDetails['effort'];
+      advisor: AdvisorCallback;
+    }
+  | { kind: 'unconfigured'; reason: string }
+> {
+  const phaseConfig = resolvePhaseModelConfig(runtime.config, phase);
+  const advisorConfig = phaseConfig?.advisor;
+  if (!phaseConfig || !advisorConfig || advisorConfig.mode === 'none' || !advisorConfig.model) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: no advisor configured for phase "${phase}" ` +
+        `(set runtime.config.models.${phase}.advisor)`,
+    };
+  }
+
+  const advisorProvider = phaseConfig.executor.provider;
+  const advisorModelEntry = ctx.modelRegistry.find(advisorProvider, advisorConfig.model);
+  if (!advisorModelEntry) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: advisor model ${advisorProvider}/${advisorConfig.model} ` +
+        `is not registered in the model registry`,
+    };
+  }
+
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(advisorModelEntry);
+  if (!auth.ok || !auth.apiKey) {
+    return {
+      kind: 'unconfigured',
+      reason: auth.ok
+        ? `piorx_advisor: no API key for ${advisorModelEntry.provider}`
+        : `piorx_advisor: ${auth.error}`,
+    };
+  }
+
+  const apiKey = auth.apiKey;
+  const headers = auth.headers;
+
+  const advisor: AdvisorCallback = async (req) => {
+    const userMessage: UserMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: req.userMessage }],
+      timestamp: Date.now(),
+    };
+    const response = await complete(
+      advisorModelEntry,
+      { systemPrompt: req.systemPrompt, messages: [userMessage] },
+      { apiKey, headers, signal: ctx.signal },
+    );
+    if (response.stopReason === 'aborted') {
+      const result: Awaited<ReturnType<AdvisorCallback>> = {
+        text: '',
+        errorCode: 'aborted',
+      };
+      return result;
+    }
+    const text = response.content
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+    const result: Awaited<ReturnType<AdvisorCallback>> = { text };
+    if (response.usage) {
+      result.usage = {
+        input_tokens: response.usage.input ?? 0,
+        output_tokens: response.usage.output ?? 0,
+      };
+    }
+    return result;
+  };
+
+  const effort = thinkingLevelToEffort(thinkingLevel);
+
+  return { kind: 'ok', advisorModel: advisorConfig.model, effort, advisor };
+}
+
 async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContext): Promise<void> {
   const machine = await getMachine();
   if (!ctx.hasUI) {
@@ -253,6 +416,49 @@ export default function (pi: ExtensionAPI) {
         );
       }
     }
+  });
+
+  pi.registerTool({
+    name: PIORX_ADVISOR_TOOL_NAME,
+    label: 'piorx advisor',
+    description: ADVISOR_TOOL_DESCRIPTION,
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, signal, _onUpdate, ctx): Promise<AdvisorToolResult> {
+      let thinkingLevel: string | undefined;
+      try {
+        thinkingLevel = pi.getThinkingLevel?.();
+      } catch {
+        // pi.getThinkingLevel may not be wired in non-interactive harnesses.
+      }
+
+      const built = await buildAdvisorCallback(ctx, ADVISOR_TOOL_DEFAULT_PHASE, thinkingLevel);
+      if (built.kind === 'unconfigured') {
+        const result = makeAdvisorErrorToolResult(null, null, built.reason);
+        await logEvent('runtime.advisor_tool', {
+          advisor_model: result.details.advisorModel,
+          effort: result.details.effort,
+          stop_reason: result.details.stopReason,
+          error_message: result.details.errorMessage,
+          advisor_input_tokens: 0,
+          advisor_output_tokens: 0,
+          disabled_by_env: false,
+        });
+        return result;
+      }
+
+      const systemPrompt = ctx.getSystemPrompt();
+      return runAdvisorTool({
+        request: {
+          systemPrompt,
+          userMessage: ADVISOR_TOOL_DEFAULT_USER_MESSAGE,
+          advisorModel: built.advisorModel,
+          effort: built.effort,
+        },
+        advisor: built.advisor,
+        ...(signal ? { signal } : {}),
+        logEvent,
+      });
+    },
   });
 
   pi.registerCommand('orchestra-status', {

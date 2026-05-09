@@ -487,3 +487,204 @@ function sumIterations(rows: AdvisorIteration[]): { input: number; output: numbe
   }
   return { input, output };
 }
+
+// ---------------------------------------------------------------------------
+// piorx:advisor pi-tool seam (COMP-P5-T1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Effort hint surfaced through the advisor tool result. Mirrors rpiv-advisor's
+ * field, which carries the executor's reasoning effort selection so consumers
+ * can correlate advisor consultations with the executor side that asked.
+ */
+export type AdvisorEffort = 'high' | 'medium' | 'low' | null;
+
+/**
+ * Stop-reason categories surfaced through `AdvisorToolDetails.stopReason`.
+ * `end_turn` covers the canonical success path; `aborted` matches pi-ai's
+ * `aborted` stop reason for cancelled calls; `max_tokens` mirrors the
+ * provider's truncation signal; `error` is the catch-all for thrown
+ * exceptions and advisor-side error codes.
+ */
+export type AdvisorStopReason = 'end_turn' | 'max_tokens' | 'aborted' | 'error';
+
+/**
+ * Wire-compat detail fields returned alongside the advisor tool's `content`.
+ *
+ * Field order and names match rpiv-advisor's npm-published return shape
+ * (`{ advisorModel, effort, usage, stopReason, errorMessage }`) so a consumer
+ * that switches between rpiv-advisor and piorx:advisor sees no schema drift.
+ *
+ * `usage` is `{ inputTokens, outputTokens }` (camelCase) per rpiv-advisor's
+ * shape — distinct from `runWithAdvisor`'s `AdvisorTelemetry` which uses
+ * snake_case `advisor_input_tokens` / `advisor_output_tokens` for log
+ * consumers. Both shapes record the same numbers; the camelCase shape stays
+ * on the LLM-tool wire and the snake_case shape stays in `.pi/orchestra.log`.
+ */
+export interface AdvisorToolDetails {
+  advisorModel: string | null;
+  effort: AdvisorEffort;
+  usage: { inputTokens: number; outputTokens: number } | null;
+  stopReason: AdvisorStopReason;
+  errorMessage: string | null;
+}
+
+/** Single text content block returned to the executor side of the tool call. */
+export interface AdvisorToolTextContent {
+  type: 'text';
+  text: string;
+}
+
+/**
+ * Wire-compat result of the advisor pi-tool, mirroring rpiv-advisor's
+ * zero-arg contract — `{ content, details }`. The shape is preserved on
+ * every code path (success, env-disabled, advisor-error, abort) so callers
+ * can branch on `details.stopReason` rather than catching exceptions.
+ */
+export interface AdvisorToolResult {
+  content: AdvisorToolTextContent[];
+  details: AdvisorToolDetails;
+}
+
+export interface AdvisorToolRequest {
+  systemPrompt: string;
+  userMessage: string;
+  /** Identifier of the advisor model the host resolved. */
+  advisorModel: string;
+  /** Optional effort hint surfaced verbatim on the result. */
+  effort?: AdvisorEffort;
+}
+
+export interface RunAdvisorToolOptions {
+  request: AdvisorToolRequest;
+  advisor: AdvisorCallback;
+  /** Forwarded from the pi tool execute() seam. */
+  signal?: AbortSignal;
+  /** Optional telemetry sink. */
+  logEvent?: (message: string, details?: unknown) => Promise<void> | void;
+  /** Test seam: override `process.env`. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Run a single advisor consultation in the rpiv-advisor wire-compat shape.
+ *
+ * Per `docs/composability.md` "Phase 5 — Skills-as-strategies + filesystem
+ * discovery" and COMP-P5-T1, the `piorx:advisor` pi tool surfaces an
+ * interactive advisor call from pi's main loop. The wire shape is
+ * `{ content, details: { advisorModel, effort, usage, stopReason, errorMessage } }`,
+ * matching rpiv-advisor's npm package so a consumer can swap implementations
+ * without changing prompt or tool-result handling.
+ *
+ * Failure modes preserve the result shape rather than throwing:
+ *   - `PIORX_DISABLE_ADVISOR` set → `stopReason='error'`,
+ *     `errorMessage='advisor disabled via PIORX_DISABLE_ADVISOR'`.
+ *   - `signal.aborted` mid-call → `stopReason='aborted'`.
+ *   - Advisor callback throws → `stopReason='error'`,
+ *     `errorMessage=<error.message>`.
+ *   - Advisor callback returns `errorCode` → `stopReason='error'`,
+ *     `errorMessage=<error code>`.
+ *
+ * Telemetry (when `logEvent` is provided) records the same canonical shape
+ * across all paths so post-hoc cost reconstruction matches `runWithAdvisor`'s
+ * record format.
+ */
+export async function runAdvisorTool(options: RunAdvisorToolOptions): Promise<AdvisorToolResult> {
+  const env = options.env ?? process.env;
+  const advisorModel = options.request.advisorModel;
+  const effort = options.request.effort ?? null;
+
+  if (isAdvisorDisabledByEnv(env)) {
+    const result = makeAdvisorErrorResult({
+      advisorModel,
+      effort,
+      message: `advisor disabled via ${ADVISOR_DISABLE_ENV}`,
+    });
+    await emitAdvisorToolTelemetry(options.logEvent, result, true);
+    return result;
+  }
+
+  const signal = options.signal;
+  if (signal?.aborted) {
+    const result = makeAdvisorErrorResult({
+      advisorModel,
+      effort,
+      message: 'advisor call aborted before dispatch',
+      stopReason: 'aborted',
+    });
+    await emitAdvisorToolTelemetry(options.logEvent, result, false);
+    return result;
+  }
+
+  try {
+    const response = await options.advisor({
+      systemPrompt: options.request.systemPrompt,
+      userMessage: options.request.userMessage,
+    });
+    const usage = response.usage
+      ? {
+          inputTokens: response.usage.input_tokens ?? 0,
+          outputTokens: response.usage.output_tokens ?? 0,
+        }
+      : null;
+    const stopReason: AdvisorStopReason = response.errorCode ? 'error' : 'end_turn';
+    const result: AdvisorToolResult = {
+      content: [{ type: 'text', text: response.text }],
+      details: {
+        advisorModel,
+        effort,
+        usage,
+        stopReason,
+        errorMessage: response.errorCode ?? null,
+      },
+    };
+    await emitAdvisorToolTelemetry(options.logEvent, result, false);
+    return result;
+  } catch (err) {
+    const aborted = signal?.aborted ?? false;
+    const message = err instanceof Error ? err.message : String(err);
+    const result = makeAdvisorErrorResult({
+      advisorModel,
+      effort,
+      message,
+      stopReason: aborted ? 'aborted' : 'error',
+    });
+    await emitAdvisorToolTelemetry(options.logEvent, result, false);
+    return result;
+  }
+}
+
+function makeAdvisorErrorResult(args: {
+  advisorModel: string | null;
+  effort: AdvisorEffort;
+  message: string;
+  stopReason?: AdvisorStopReason;
+}): AdvisorToolResult {
+  return {
+    content: [{ type: 'text', text: '' }],
+    details: {
+      advisorModel: args.advisorModel,
+      effort: args.effort,
+      usage: null,
+      stopReason: args.stopReason ?? 'error',
+      errorMessage: args.message,
+    },
+  };
+}
+
+async function emitAdvisorToolTelemetry(
+  logEvent: RunAdvisorToolOptions['logEvent'],
+  result: AdvisorToolResult,
+  disabledByEnv: boolean,
+): Promise<void> {
+  if (!logEvent) return;
+  await logEvent('runtime.advisor_tool', {
+    advisor_model: result.details.advisorModel,
+    effort: result.details.effort,
+    stop_reason: result.details.stopReason,
+    error_message: result.details.errorMessage,
+    advisor_input_tokens: result.details.usage?.inputTokens ?? 0,
+    advisor_output_tokens: result.details.usage?.outputTokens ?? 0,
+    disabled_by_env: disabledByEnv,
+  });
+}
