@@ -536,6 +536,85 @@
         "Promotion target is read from the active workflow spec at runtime",
         "Default workflow's recursive_promotion_target=restatement preserves current behavior"
       ]
+    },
+    {
+      "id": "COMP-P7-T1",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Implement workflow-executor sub-workflow descent (workflow_ref + inline workflow:)",
+      "scope": "medium",
+      "description": "WorkflowSpecV1 declares both `workflow_ref: string` and inline `workflow: WorkflowSpecBody` on each stage (artifacts/types.ts), and the registry validates inline structure (checkSubWorkflows: operating_mode <= parent, mandatory_controls additive, cycles, max depth) and as of the May 2026 audit also validates workflow_ref references at boot (existence + authority + control propagation, registry.ts checkWorkflowRefStage). Runtime descent into either form is NOT yet implemented in the executor (workflow-executor.ts runStage looks for a registered Stage implementation and throws 'no Stage implementation registered' for stages that have a sub-workflow instead). Implement: when a stage declares workflow_ref or inline workflow, the executor resolves the sub-workflow, instantiates a child executor, runs it to completion, and surfaces the sub-workflow's final artifact as this stage's output. Stage implementations remain optional for sub-workflow stages — the registry should relax 'no Stage implementation registered' for stages that declare a sub-workflow.",
+      "deliverable": "Stages with workflow_ref or inline workflow execute sub-workflow end-to-end and return the sub-workflow's final artifact as their output.",
+      "files": [
+        "src/runtime/workflow-executor.ts",
+        "src/runtime/registry.ts",
+        "tests/runtime/workflow-executor.test.ts"
+      ],
+      "dependencies": ["COMP-P1-T7"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Stage with workflow_ref runs the referenced workflow as a sub-process and returns its final artifact",
+        "Stage with inline workflow: runs the inline sub-workflow and returns its final artifact",
+        "Sub-workflow gates run during descent; parent stage's gates run after the sub-workflow returns",
+        "Lineage records the sub-workflow's stages with their own workflow_spec_id (forward-compatible with sub-tree representation in COMP-P7-T3)"
+      ]
+    },
+    {
+      "id": "COMP-P7-T2",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "__exit__ virtual edge target for sub-workflow early-exit",
+      "scope": "short",
+      "description": "docs/composability.md describes a virtual `__exit__` edge target that lets a sub-workflow promote any intermediate stage's output as its final artifact without an explicit passthrough stage. The executor currently has no special-case handling for `__exit__` — selectNextStage returns the literal string and the next iteration fails with 'no stage spec for id __exit__'. Recognize __exit__ in selectNextStage and treat it as a sentinel meaning 'end this (sub-)workflow now; current stage's output is the final artifact'.",
+      "deliverable": "Sub-workflows can early-exit through a __exit__ edge target without a passthrough stage.",
+      "files": ["src/runtime/workflow-executor.ts", "tests/runtime/workflow-executor.test.ts"],
+      "dependencies": ["COMP-P7-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "An edge with `to: __exit__` resolves to a successful workflow termination at the originating stage",
+        "The current stage's output_artifact is the workflow's final artifact",
+        "Lineage records the early-exit decision unambiguously (e.g. final_stage_id matches the originating stage)"
+      ]
+    },
+    {
+      "id": "COMP-P7-T3",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "Sub-workflow stage-id namespacing and lineage sub-tree recording",
+      "scope": "medium",
+      "description": "Two related sub-workflow concerns deferred from Phase 1: (a) when a parent registers a sub-workflow, its stage ids should be prefixed with the parent stage id at the registry level (`synthesis.draft`, `synthesis.critique`) so they don't collide with parent-workflow stages of the same id; (b) lineage entries for sub-workflow runs should be recorded as a sub-tree of the parent stage's lineage entry rather than a flat sequence. Today the lineage is a flat array of LineageEntry; sub-workflow runs would intermix with parent stages with no structural relationship. Add an optional sub_lineage field on LineageEntry, populate it from the executor when descending into a sub-workflow, and update the executor to namespace sub-workflow stage ids before resolving them in the registry.",
+      "deliverable": "Sub-workflow stage ids are namespaced under the parent at registration time; lineage carries a sub_lineage tree under the parent stage entry.",
+      "files": [
+        "src/runtime/session-state.ts",
+        "src/runtime/workflow-executor.ts",
+        "src/runtime/registry.ts",
+        "tests/runtime/workflow-executor.test.ts"
+      ],
+      "dependencies": ["COMP-P7-T1"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "Sub-workflow stages register under namespaced ids (e.g. synthesis.draft) without colliding with parent stages",
+        "LineageEntry has an optional sub_lineage: LineageEntry[] populated by the executor when descending",
+        "Audit walkers can reconstruct the parent/child workflow hierarchy from lineage alone"
+      ]
+    },
+    {
+      "id": "COMP-P7-T4",
+      "sprint": "Sprint 7",
+      "phase": 7,
+      "title": "End-to-end tests for sub-workflow execution",
+      "scope": "short",
+      "description": "Runtime descent for sub-workflows landed in COMP-P7-T1/T2/T3. Add E2E coverage: a host workflow with a stage declaring inline `workflow:` runs through the executor and produces the sub-workflow's final artifact; a host workflow with `workflow_ref` resolves through the registry and runs the referenced workflow; a sub-workflow uses __exit__ to short-circuit; sub-workflow lineage appears as a sub-tree of the parent stage entry. Each test covers one acceptance criterion from the prior tasks.",
+      "deliverable": "Test coverage for sub-workflow descent, __exit__, and lineage sub-tree recording so the runtime behavior is protected against regression.",
+      "files": ["tests/runtime/workflow-executor.test.ts"],
+      "dependencies": ["COMP-P7-T1", "COMP-P7-T2", "COMP-P7-T3"],
+      "status": "planned",
+      "acceptance_criteria": [
+        "E2E test runs a host workflow with inline `workflow:` and asserts the sub-workflow's final artifact is returned",
+        "E2E test runs a host workflow with workflow_ref and asserts identical behavior",
+        "E2E test exercises __exit__ early-exit and asserts the early-exit stage's output becomes the final artifact",
+        "Lineage assertion confirms sub-workflow stage runs appear as a sub-tree of the parent stage entry"
+      ]
     }
   ]
 }
