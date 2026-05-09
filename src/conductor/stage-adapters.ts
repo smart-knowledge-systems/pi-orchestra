@@ -592,6 +592,22 @@ export const retrievalStage: Stage<'piorx/intent-restatement@1', 'piorx/retrieva
       throw new Error(`retrieval stage: dispatch failed — ${result.message}`);
     }
 
+    // Surface the bounded retriever agent's `read_file` decisions to lineage
+    // so the audit trail satisfies the default workflow's
+    // `evidence_requirements: ['source-access-events']` for the retrieval stage
+    // (`src/runtime/workflows/piorx-default.workflow.md`). The executor's
+    // `appendLineage` wrapper folds these events into the canonical lineage
+    // entry produced by `transitionStage` so they ride alongside the stage's
+    // primary record without a separate audit row.
+    if (result.source_access_events && result.source_access_events.length > 0) {
+      ctx.appendLineage({
+        stage: 'retrieval',
+        artifact_id: '',
+        timestamp: new Date().toISOString(),
+        source_access_events: result.source_access_events,
+      });
+    }
+
     if (ui) {
       ui.notify(`Retrieval complete: ${result.retrieval_index_id}`, 'info');
     }
