@@ -32,6 +32,13 @@ import { validateArtifact } from '../artifacts/schemas.ts';
 import { evidenceReviewGate } from '../conductor/evidence-overrides.ts';
 import type { GateOp, GateOpValidation, GateSpec } from './gate.ts';
 import type { Stage } from './stage.ts';
+import {
+  discoverStrategies,
+  type AdvisorStrategy,
+  type DiscoverStrategiesOptions,
+  type StrategyDiagnostic,
+} from './strategy-loader.ts';
+import type { PiOrchestraConfig } from './config.ts';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -132,6 +139,7 @@ export class WorkflowRegistry {
   private readonly workflows = new Map<string, WorkflowSpecV1>();
   private readonly stages = new Map<string, Stage>();
   private readonly gates = new Map<string, GateSpec[]>();
+  private readonly strategies = new Map<string, AdvisorStrategy>();
   private readonly maxNestingDepth: number;
 
   constructor(options: WorkflowRegistryOptions = {}) {
@@ -233,6 +241,44 @@ export class WorkflowRegistry {
 
   gatesFor(stageId: string): readonly GateSpec[] {
     return this.gates.get(stageId) ?? [];
+  }
+
+  // -----------------------------------------------------------------------
+  // Strategy registration / resolution (Phase 5 — COMP-P5-T2)
+  //
+  // Strategies are resolved-from-disk advisor recipes (`AdvisorStrategy`).
+  // The registry surface for them is intentionally narrow at Phase 5: name
+  // uniqueness, retrieval by name, and an enumeration. Invocation
+  // semantics — turning a registered strategy into a model call or a tool
+  // result — live on extensions and on the synthesis-stage advisor wiring.
+  // -----------------------------------------------------------------------
+
+  /**
+   * Register a discovered strategy. Names are unique across all scopes; the
+   * canonical pattern is to call `discoverStrategiesAndRegister(...)` once
+   * at boot, which handles project/user-scope conflict resolution before any
+   * registration happens. Direct `registerStrategy` is also supported for
+   * tests and for hosts that synthesize strategies programmatically.
+   */
+  registerStrategy(strategy: AdvisorStrategy): void {
+    if (this.strategies.has(strategy.name)) {
+      const existing = this.strategies.get(strategy.name)!;
+      throw new WorkflowRegistryError([
+        `strategy "${strategy.name}" already registered from ${existing.source_path} ` +
+          `(${existing.scope} scope); duplicate at ${strategy.source_path} (${strategy.scope} scope)`,
+      ]);
+    }
+    this.strategies.set(strategy.name, strategy);
+  }
+
+  /** Resolve a registered strategy by name. */
+  resolveStrategy(name: string): AdvisorStrategy | undefined {
+    return this.strategies.get(name);
+  }
+
+  /** Return every registered strategy in registration order. */
+  listStrategies(): readonly AdvisorStrategy[] {
+    return [...this.strategies.values()];
   }
 
   // -----------------------------------------------------------------------
@@ -533,6 +579,63 @@ export class WorkflowRegistry {
  */
 export function registerDefaultGates(registry: WorkflowRegistry): void {
   registry.registerGate('evidence', evidenceReviewGate);
+}
+
+// ---------------------------------------------------------------------------
+// Strategy discovery (Phase 5 — COMP-P5-T2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of running `discoverStrategiesAndRegister` against a registry.
+ *
+ * `registered` is the ordered list of strategies the registry now resolves
+ * by name. `diagnostics` carries every parse failure, frontmatter rejection,
+ * and project/user-scope shadow surfaced during discovery. The host is
+ * responsible for surfacing diagnostics — the registry does not log on
+ * its own so tests and CLIs can route them as needed.
+ */
+export interface StrategyDiscoveryResult {
+  readonly registered: readonly AdvisorStrategy[];
+  readonly diagnostics: readonly StrategyDiagnostic[];
+}
+
+/**
+ * Discover strategies from `~/.config/piorx/strategies/` and
+ * `<repoRoot>/.piorx/strategies/`, registering each surviving entry against
+ * the registry. Project scope wins on name conflict (first-name-wins,
+ * matching pi's idiom for tool / command resolution); shadowed user-scope
+ * files surface as diagnostics rather than silent drops.
+ *
+ * The function does not throw on malformed strategies — instead it returns
+ * the partial set of registered strategies plus a diagnostic per failure so
+ * the host can report multiple problems in one pass. A registration-time
+ * `WorkflowRegistryError` propagates out only for true conflicts (a
+ * programmatic register call collided with a discovered name).
+ */
+export function discoverStrategiesAndRegister(
+  registry: WorkflowRegistry,
+  config: PiOrchestraConfig,
+  options: DiscoverStrategiesOptions = {},
+): StrategyDiscoveryResult {
+  const { strategies, diagnostics } = discoverStrategies(config, options);
+  const registered: AdvisorStrategy[] = [];
+  const dynamicDiagnostics: StrategyDiagnostic[] = [];
+  for (const strategy of strategies) {
+    try {
+      registry.registerStrategy(strategy);
+      registered.push(strategy);
+    } catch (err) {
+      dynamicDiagnostics.push({
+        source_path: strategy.source_path,
+        scope: strategy.scope,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return {
+    registered: Object.freeze([...registered]),
+    diagnostics: Object.freeze([...diagnostics, ...dynamicDiagnostics]),
+  };
 }
 
 // ---------------------------------------------------------------------------
