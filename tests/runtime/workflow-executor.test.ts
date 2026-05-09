@@ -833,3 +833,243 @@ describe('WorkflowExecutor — registry boot-time drift detection', () => {
     expect(() => registry.validate()).toThrow(/restate/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7 — sub-workflow descent + __exit__
+// ---------------------------------------------------------------------------
+
+describe('WorkflowExecutor — sub-workflow descent (workflow_ref + inline workflow:)', () => {
+  /**
+   * Build a host spec whose sole stage delegates to a sub-workflow. The
+   * `attach` function configures whether the parent stage carries
+   * `workflow_ref` or an inline `workflow:` body, plus optional gates on
+   * either the parent stage or the sub-stage. Parent gates run after the
+   * sub-workflow returns; sub-workflow gates run during descent.
+   */
+  function buildHostSpecWithSubWorkflow(args: {
+    parentGates?: string[];
+    subGates?: string[];
+    workflowRef?: string;
+    inline?: boolean;
+  }): WorkflowSpecV1 {
+    const subBody = {
+      id: 'test/sub-workflow@1',
+      name: 'Sub-workflow',
+      description: 'inline sub-workflow used by the host stage',
+      goals: ['exercise sub-workflow descent'],
+      operating_mode: 'supervised-change' as const,
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'inner-capture',
+          name: 'Inner Capture',
+          description: 'capture inside sub',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+          ...(args.subGates ? { gates: args.subGates } : {}),
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'inner-capture',
+    };
+    return {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: generateArtifactId('piorx/workflow-spec@1'),
+      id: 'test/host-with-sub@1',
+      name: 'Host with sub-workflow',
+      description: 'host workflow whose stage delegates to a sub-workflow',
+      goals: ['delegate to sub-workflow'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'wrap',
+          name: 'Wrap',
+          description: 'wraps a sub-workflow',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+          ...(args.parentGates ? { gates: args.parentGates } : {}),
+          ...(args.workflowRef
+            ? { workflow_ref: args.workflowRef }
+            : args.inline
+              ? { workflow: subBody }
+              : {}),
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'wrap',
+    };
+  }
+
+  test('inline workflow: descends and surfaces the sub-workflow final artifact as the parent stage output', async () => {
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildHostSpecWithSubWorkflow({ inline: true }));
+    // Inner Stage adapter — the sub-workflow's only stage produces the
+    // intent-capture artifact that bubbles up as the host stage's output.
+    registry.registerStage({ ...captureStage(), id: 'inner-capture' });
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run('test/host-with-sub@1');
+
+    expect(result.stage_runs.map((r) => r.stage_id)).toEqual(['wrap']);
+    expect(result.final_stage_id).toBe('wrap');
+    expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
+    // Lineage shows the sub-workflow's stage entry carries the sub-spec id,
+    // while the parent stage's lineage entry carries the host spec id.
+    const lineage = executor.sessionState.lineage;
+    const subEntry = lineage.find((e) => e.stage_id === 'inner-capture');
+    expect(subEntry?.workflow_spec_id).toBe('test/sub-workflow@1');
+    const parentEntry = lineage.find((e) => e.stage_id === 'wrap');
+    expect(parentEntry?.workflow_spec_id).toBe('test/host-with-sub@1');
+  });
+
+  test('workflow_ref descends through the registry and produces the same final artifact', async () => {
+    const registry = new WorkflowRegistry();
+    // Register the referenced sub-workflow as a top-level workflow first so
+    // workflow_ref resolves through the registry.
+    const subSpec: WorkflowSpecV1 = {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: generateArtifactId('piorx/workflow-spec@1'),
+      id: 'test/sub-workflow@1',
+      name: 'Registered sub-workflow',
+      description: 'registered sub-workflow used through workflow_ref',
+      goals: ['exercise workflow_ref descent'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'inner-capture',
+          name: 'Inner Capture',
+          description: 'capture inside referenced sub',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'inner-capture',
+    };
+    registry.registerWorkflow(subSpec);
+    registry.registerWorkflow(buildHostSpecWithSubWorkflow({ workflowRef: 'test/sub-workflow@1' }));
+    registry.registerStage({ ...captureStage(), id: 'inner-capture' });
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run('test/host-with-sub@1');
+    expect(result.final_stage_id).toBe('wrap');
+    expect(result.final_artifact_type).toBe('piorx/intent-capture@1');
+    const lineage = executor.sessionState.lineage;
+    expect(lineage.find((e) => e.stage_id === 'inner-capture')?.workflow_spec_id).toBe(
+      'test/sub-workflow@1',
+    );
+    expect(lineage.find((e) => e.stage_id === 'wrap')?.workflow_spec_id).toBe(
+      'test/host-with-sub@1',
+    );
+  });
+
+  test('sub-workflow gates run during descent; parent gates run after the sub-workflow returns', async () => {
+    const order: string[] = [];
+    function makeGate(id: string): GateSpec {
+      return {
+        id,
+        async presents(): Promise<GatePresentation> {
+          return { summary: `${id} review` };
+        },
+        validateOverride(): GateOpValidation {
+          return { valid: true, errors: [] };
+        },
+        async applyOverride(): Promise<void> {},
+      };
+    }
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(
+      buildHostSpecWithSubWorkflow({
+        parentGates: ['parent.gate'],
+        subGates: ['sub.gate'],
+        inline: true,
+      }),
+    );
+    registry.registerStage({ ...captureStage(), id: 'inner-capture' });
+    registry.registerGate('inner-capture', makeGate('sub.gate'));
+    registry.registerGate('wrap', makeGate('parent.gate'));
+
+    const broker: GateBroker = async (gate) => {
+      order.push(gate.id);
+      return { kind: 'accepted' };
+    };
+    const { executor } = buildExecutor({ registry, gateBroker: broker });
+    await executor.run('test/host-with-sub@1');
+    expect(order).toEqual(['sub.gate', 'parent.gate']);
+  });
+
+  test('registry.validate() does not require a Stage implementation for stages declaring a sub-workflow', () => {
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildHostSpecWithSubWorkflow({ inline: true }));
+    // Register the sub-stage adapter only. The parent `wrap` stage has NO
+    // adapter — descent into the inline workflow takes the place of
+    // `Stage.run()`, so the registry should not flag the missing impl.
+    registry.registerStage({ ...captureStage(), id: 'inner-capture' });
+    expect(() => registry.validate()).not.toThrow();
+  });
+
+  test('registry.validate() still flags missing impls for non-sub-workflow stages', () => {
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildSpec());
+    registry.registerStage(captureStage());
+    // Restate, synth adapters intentionally omitted — validate should
+    // surface "no Stage implementation registered" for them.
+    expect(() => registry.validate()).toThrow(/no Stage implementation registered/);
+  });
+});
+
+describe('WorkflowExecutor — __exit__ virtual edge target', () => {
+  test('an edge with to: __exit__ ends the workflow at the originating stage', async () => {
+    const spec = buildSpec({
+      stages: [
+        {
+          id: 'capture',
+          name: 'Capture',
+          description: 'capture',
+          inputs: [],
+          output: 'piorx/intent-capture@1',
+          model_class: 'noop',
+        },
+        {
+          id: 'restate',
+          name: 'Restate',
+          description: 'restate',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'noop',
+        },
+        {
+          id: 'synth',
+          name: 'Synth',
+          description: 'never reached',
+          inputs: ['piorx/intent-restatement@1'],
+          output: 'piorx/analysis-report@1 | piorx/change-spec@1',
+          model_class: 'noop',
+        },
+      ],
+      edges: [
+        { from: 'capture', to: 'restate', description: 'unconditional' },
+        { from: 'restate', to: '__exit__', description: 'early-exit at restate' },
+      ],
+    });
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(spec);
+    registry.registerStage(captureStage());
+    registry.registerStage(restateStage());
+    // Register synth too so a regression that ignores __exit__ would walk
+    // into it instead of stopping cleanly.
+    registry.registerStage(synthStage('analysis-report'));
+
+    const { executor } = buildExecutor({ registry });
+    const result = await executor.run(spec.id);
+    expect(result.stage_runs.map((r) => r.stage_id)).toEqual(['capture', 'restate']);
+    // The originating stage's output is the workflow's final artifact.
+    expect(result.final_stage_id).toBe('restate');
+    expect(result.final_artifact_type).toBe('piorx/intent-restatement@1');
+  });
+});
