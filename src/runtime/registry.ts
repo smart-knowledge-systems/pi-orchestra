@@ -498,31 +498,40 @@ export class WorkflowRegistry {
       if (stageSpec.workflow_ref) {
         this.checkWorkflowRefStage(spec, stageSpec.id, stageSpec.workflow_ref, violations);
       }
-      // Stage implementation present and matching.
-      const impl = this.stages.get(stageSpec.id);
-      if (!impl) {
-        violations.push(
-          `workflow "${spec.id}" stage "${stageSpec.id}": no Stage implementation registered`,
-        );
-      } else {
-        // Inputs/outputs must agree shape-wise.
-        if (impl.inputs.length !== stageSpec.inputs.length) {
+      // Stage implementation present and matching. Stages that declare a
+      // sub-workflow (workflow_ref or inline workflow:) do not require a
+      // Stage implementation — descent into the sub-workflow takes the
+      // place of `Stage.run()` per docs/composability.md "Workflows also
+      // nest". A registered implementation is harmless (descent always
+      // wins at runtime) but is not required.
+      const declaresSubWorkflow =
+        stageSpec.workflow_ref !== undefined || stageSpec.workflow !== undefined;
+      if (!declaresSubWorkflow) {
+        const impl = this.stages.get(stageSpec.id);
+        if (!impl) {
           violations.push(
-            `workflow "${spec.id}" stage "${stageSpec.id}": Stage declares ${impl.inputs.length} inputs but spec declares ${stageSpec.inputs.length}`,
+            `workflow "${spec.id}" stage "${stageSpec.id}": no Stage implementation registered`,
           );
         } else {
-          for (let i = 0; i < impl.inputs.length; i++) {
-            if (impl.inputs[i] !== stageSpec.inputs[i]) {
-              violations.push(
-                `workflow "${spec.id}" stage "${stageSpec.id}": input[${i}] "${impl.inputs[i]}" disagrees with spec's "${stageSpec.inputs[i]}"`,
-              );
+          // Inputs/outputs must agree shape-wise.
+          if (impl.inputs.length !== stageSpec.inputs.length) {
+            violations.push(
+              `workflow "${spec.id}" stage "${stageSpec.id}": Stage declares ${impl.inputs.length} inputs but spec declares ${stageSpec.inputs.length}`,
+            );
+          } else {
+            for (let i = 0; i < impl.inputs.length; i++) {
+              if (impl.inputs[i] !== stageSpec.inputs[i]) {
+                violations.push(
+                  `workflow "${spec.id}" stage "${stageSpec.id}": input[${i}] "${impl.inputs[i]}" disagrees with spec's "${stageSpec.inputs[i]}"`,
+                );
+              }
             }
           }
-        }
-        if (impl.output !== stageSpec.output) {
-          violations.push(
-            `workflow "${spec.id}" stage "${stageSpec.id}": Stage output "${impl.output}" disagrees with spec output "${stageSpec.output}"`,
-          );
+          if (impl.output !== stageSpec.output) {
+            violations.push(
+              `workflow "${spec.id}" stage "${stageSpec.id}": Stage output "${impl.output}" disagrees with spec output "${stageSpec.output}"`,
+            );
+          }
         }
       }
       // Every gate id has a registered GateSpec.

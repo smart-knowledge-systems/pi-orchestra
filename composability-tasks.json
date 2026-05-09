@@ -551,7 +551,7 @@
         "tests/runtime/workflow-executor.test.ts"
       ],
       "dependencies": ["COMP-P1-T7"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Stage with workflow_ref runs the referenced workflow as a sub-process and returns its final artifact",
         "Stage with inline workflow: runs the inline sub-workflow and returns its final artifact",
@@ -569,7 +569,7 @@
       "deliverable": "Sub-workflows can early-exit through a __exit__ edge target without a passthrough stage.",
       "files": ["src/runtime/workflow-executor.ts", "tests/runtime/workflow-executor.test.ts"],
       "dependencies": ["COMP-P7-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "An edge with `to: __exit__` resolves to a successful workflow termination at the originating stage",
         "The current stage's output_artifact is the workflow's final artifact",

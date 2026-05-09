@@ -950,11 +950,7 @@ export const synthesisStage: Stage<
     // the actual artifact, not just inherited from the spec default. The
     // notification + log surface the unfit case to the user and the audit
     // trail so it isn't silently downstream-consumed as a fit deliverable.
-    const fitness = await assessSynthesisFitness(
-      ctx,
-      taskType,
-      result.synthesis_artifact_id,
-    );
+    const fitness = await assessSynthesisFitness(ctx, taskType, result.synthesis_artifact_id);
     await logIfPresent(services, 'stage5.acceptance_check', {
       taskType,
       synthesis_artifact_id: result.synthesis_artifact_id,

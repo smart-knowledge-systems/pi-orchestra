@@ -414,15 +414,11 @@ function buildHostSpecWithWorkflowRef(refId: string): WorkflowSpecV1 {
     ...base,
     id: 'piorx/workflow/ref-host@1',
     artifact_id: `${base.artifact_id}-ref-host`,
-    stages: base.stages.map((s) =>
-      s.id === 'synthesis' ? { ...s, workflow_ref: refId } : s,
-    ),
+    stages: base.stages.map((s) => (s.id === 'synthesis' ? { ...s, workflow_ref: refId } : s)),
   };
 }
 
-function buildReferencedWorkflow(
-  overrides: Partial<WorkflowSpecV1> = {},
-): WorkflowSpecV1 {
+function buildReferencedWorkflow(overrides: Partial<WorkflowSpecV1> = {}): WorkflowSpecV1 {
   // Default referenced workflow is self-consistent: its mandatory_controls
   // are declared on `sub.dummy.gates` and matched by stub gate registrations
   // in setupRefTestRegistry. Tests override only the fields they care about

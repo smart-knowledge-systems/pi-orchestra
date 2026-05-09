@@ -33,6 +33,7 @@ import {
   type Artifact,
   type ArtifactType,
   type WorkflowEdgeSpec,
+  type WorkflowSpecBody,
   type WorkflowSpecV1,
   type WorkflowStageSpec,
 } from '../artifacts/types.ts';
@@ -214,6 +215,16 @@ export interface WorkflowExecutorOptions {
 const KNOWN_ARTIFACT_TYPES = new Set<string>(ARTIFACT_TYPES);
 
 /**
+ * Virtual edge target signaling that the (sub-)workflow should terminate at
+ * the originating stage and surface that stage's output as the final
+ * artifact. Per `docs/composability.md` "Workflows also nest", `__exit__`
+ * lets a sub-workflow promote any intermediate stage's output without an
+ * explicit passthrough stage. The constant is intentionally a string literal
+ * so it can appear verbatim in workflow-spec YAML edges.
+ */
+export const EXIT_SENTINEL = '__exit__';
+
+/**
  * Maps an artifact-type id to the corresponding session-state slot. Returns
  * `null` for artifact types that do not have a slot (workflow-spec,
  * recursive-intent — neither is consumed by a downstream stage in the
@@ -286,6 +297,27 @@ function asSessionStage(stageId: string): SessionStage {
  */
 function workflowArtifactId(spec: WorkflowSpecV1): string {
   return spec.artifact_id ?? spec.id;
+}
+
+/**
+ * Promote an inline `WorkflowSpecBody` (from a stage's `workflow:` block) to
+ * a fully-typed `WorkflowSpecV1` so the recursive descent path can run it
+ * through the same `runSpec` machinery as a top-level workflow.
+ *
+ * The synthesized `artifact_id` is deterministic and namespaced under the
+ * parent stage so lineage entries from inline sub-workflows can be traced
+ * back to the originating parent without ambiguity.
+ */
+function materializeInlineSpec(
+  parentSpec: WorkflowSpecV1,
+  parentStageId: string,
+  body: WorkflowSpecBody,
+): WorkflowSpecV1 {
+  return {
+    ...body,
+    artifact_type: 'piorx/workflow-spec@1',
+    artifact_id: `${workflowArtifactId(parentSpec)}::${parentStageId}::inline`,
+  };
 }
 
 /**
@@ -440,14 +472,28 @@ export class WorkflowExecutor {
    */
   async run(workflowId: string, options?: { startStageId?: string }): Promise<WorkflowRunResult> {
     const spec = this.registry.resolveWorkflow(workflowId);
+    return this.runSpec(spec, options);
+  }
+
+  /**
+   * Walk an already-resolved workflow spec. Shared between the public
+   * `run(workflowId)` entry and the private sub-workflow descent path —
+   * inline `workflow:` blocks are not registered in the registry, so the
+   * descent path constructs a `WorkflowSpecV1` from the inline body and
+   * passes it directly here.
+   */
+  private async runSpec(
+    spec: WorkflowSpecV1,
+    options?: { startStageId?: string },
+  ): Promise<WorkflowRunResult> {
     if (spec.stages.length === 0) {
-      throw new WorkflowExecutorError(`workflow "${workflowId}" has no stages declared`);
+      throw new WorkflowExecutorError(`workflow "${spec.id}" has no stages declared`);
     }
 
     const startStageId = options?.startStageId ?? spec.stages[0]!.id;
     if (!spec.stages.some((s) => s.id === startStageId)) {
       throw new WorkflowExecutorError(
-        `workflow "${workflowId}": startStageId "${startStageId}" does not match any declared stage`,
+        `workflow "${spec.id}": startStageId "${startStageId}" does not match any declared stage`,
       );
     }
 
@@ -457,35 +503,51 @@ export class WorkflowExecutor {
     while (currentStageId) {
       if (this.signal?.aborted) {
         throw new WorkflowExecutorError(
-          `workflow "${workflowId}": aborted before stage "${currentStageId}"`,
+          `workflow "${spec.id}": aborted before stage "${currentStageId}"`,
         );
       }
 
       const stageSpec = spec.stages.find((s) => s.id === currentStageId);
       if (!stageSpec) {
         throw new WorkflowExecutorError(
-          `workflow "${workflowId}": no stage spec for id "${currentStageId}"`,
-        );
-      }
-      const stageImpl = this.registry.resolveStage(currentStageId);
-      if (!stageImpl) {
-        throw new WorkflowExecutorError(
-          `workflow "${workflowId}": no Stage implementation registered for "${currentStageId}"`,
+          `workflow "${spec.id}": no stage spec for id "${currentStageId}"`,
         );
       }
 
-      const record = await this.runStage(spec, stageSpec, stageImpl, records);
+      const declaresSubWorkflow =
+        stageSpec.workflow_ref !== undefined || stageSpec.workflow !== undefined;
+
+      let record: StageRunRecord;
+      if (declaresSubWorkflow) {
+        record = await this.runSubWorkflowStage(spec, stageSpec, records);
+      } else {
+        const stageImpl = this.registry.resolveStage(currentStageId);
+        if (!stageImpl) {
+          throw new WorkflowExecutorError(
+            `workflow "${spec.id}": no Stage implementation registered for "${currentStageId}"`,
+          );
+        }
+        record = await this.runStage(spec, stageSpec, stageImpl, records);
+      }
       records.push(record);
 
       const next = this.selectNextStage(spec, currentStageId, records);
       if (!next) break;
+      // `__exit__` is the virtual edge target documented in
+      // `docs/composability.md` "Workflows also nest" — it ends the
+      // (sub-)workflow at the current stage and promotes that stage's
+      // output as the final artifact, without requiring an explicit
+      // passthrough stage. The most recent record is already in `records`,
+      // so breaking here makes its `output_artifact` the final artifact and
+      // its stage id the `final_stage_id`.
+      if (next === EXIT_SENTINEL) break;
       currentStageId = next;
     }
 
     const final = records[records.length - 1];
     if (!final) {
       throw new WorkflowExecutorError(
-        `workflow "${workflowId}": no stages completed (start was "${startStageId}")`,
+        `workflow "${spec.id}": no stages completed (start was "${startStageId}")`,
       );
     }
     return {
@@ -509,7 +571,7 @@ export class WorkflowExecutor {
     prior: readonly StageRunRecord[],
   ): Promise<StageRunRecord> {
     const sourceAccessEvents: SourceAccessEvent[] = [];
-    const ctx = this.buildStageContext(stageImpl, sourceAccessEvents);
+    const ctx = this.buildStageContext(stageImpl.id, sourceAccessEvents);
 
     const result = await stageImpl.run(ctx);
     const { artifact, type } = await this.loadOutput(stageSpec, result);
@@ -535,6 +597,88 @@ export class WorkflowExecutor {
       gate_decisions: gateDecisions,
       failure_handling: result.failure_handling ?? stageImpl.control?.failure_handling,
     };
+  }
+
+  /**
+   * Run a stage that declares a sub-workflow (either `workflow_ref` pointing
+   * at a registered workflow, or an inline `workflow:` body).
+   *
+   * Per `docs/composability.md` "Workflows also nest": the sub-workflow's
+   * final artifact becomes the parent stage's output; sub-workflow gates run
+   * during descent (handled by the recursive `runSpec` call) and the parent
+   * stage's gates run after descent returns. Each sub-stage's lineage entry
+   * carries the sub-workflow's `workflow_spec_id` (set by the recursive
+   * `transitionStage` call inside the descent), forward-compatible with
+   * COMP-P7-T3's sub-tree representation.
+   */
+  private async runSubWorkflowStage(
+    parentSpec: WorkflowSpecV1,
+    parentStageSpec: WorkflowStageSpec,
+    prior: readonly StageRunRecord[],
+  ): Promise<StageRunRecord> {
+    const subSpec = this.resolveSubWorkflowSpec(parentSpec, parentStageSpec);
+
+    const subResult = await this.runSpec(subSpec);
+
+    // Adopt the sub-workflow's final artifact as the parent stage's output.
+    // `loadOutput` validates the produced type matches one of the parent
+    // stage's declared `output` candidates — a sub-workflow whose terminal
+    // artifact disagrees with the parent stage's contract surfaces here.
+    const surrogate: StageResult = { output_artifact_id: subResult.final_artifact_id };
+    const { artifact, type } = await this.loadOutput(parentStageSpec, surrogate);
+    this.applySessionPointers(type, surrogate);
+
+    // Parent gates run after the sub-workflow returns. The context's
+    // model/advisor seams resolve against the parent stage id so a phase-
+    // aware host wires gate-side advisor calls to the parent phase, not the
+    // sub-workflow's last stage.
+    const sourceAccessEvents: SourceAccessEvent[] = [];
+    const ctx = this.buildStageContext(parentStageSpec.id, sourceAccessEvents);
+    const gateDecisions = await this.runGates(parentSpec, parentStageSpec, ctx, prior);
+
+    const sessionStage = asSessionStage(parentStageSpec.id);
+    this.session = transitionStage(this.session, sessionStage, surrogate.output_artifact_id, {
+      stage_id: parentStageSpec.id,
+      workflow_spec_id: parentSpec.id,
+      role: this.role,
+      gate_decisions: gateDecisions.length > 0 ? gateDecisions : undefined,
+      source_access_events: sourceAccessEvents.length > 0 ? sourceAccessEvents : undefined,
+    });
+
+    return {
+      stage_id: parentStageSpec.id,
+      output_artifact_id: surrogate.output_artifact_id,
+      output_artifact_type: type,
+      output_artifact: artifact,
+      additional_artifact_ids: [],
+      gate_decisions: gateDecisions,
+      failure_handling: undefined,
+    };
+  }
+
+  /**
+   * Materialize a `WorkflowSpecV1` for a stage's sub-workflow. `workflow_ref`
+   * points at a registered workflow and is resolved through the registry
+   * (the registry's boot-time `checkWorkflowRefStage` already verified
+   * existence + authority + control propagation). An inline `workflow:`
+   * body is a `WorkflowSpecBody` without artifact-base fields; the executor
+   * synthesizes a deterministic `artifact_id` so lineage entries from the
+   * sub-workflow can be correlated back to the parent stage.
+   */
+  private resolveSubWorkflowSpec(
+    parentSpec: WorkflowSpecV1,
+    parentStageSpec: WorkflowStageSpec,
+  ): WorkflowSpecV1 {
+    if (parentStageSpec.workflow_ref) {
+      return this.registry.resolveWorkflow(parentStageSpec.workflow_ref);
+    }
+    const body = parentStageSpec.workflow;
+    if (!body) {
+      throw new WorkflowExecutorError(
+        `workflow "${parentSpec.id}" stage "${parentStageSpec.id}": runSubWorkflowStage called without workflow_ref or inline workflow`,
+      );
+    }
+    return materializeInlineSpec(parentSpec, parentStageSpec.id, body);
   }
 
   /**
@@ -600,7 +744,7 @@ export class WorkflowExecutor {
    * stitch them together manually.
    */
   private buildStageContext(
-    stageImpl: Stage,
+    stageId: string,
     sourceAccessEvents: SourceAccessEvent[],
   ): StageContext {
     const appendLineage: LineageAppend = (entry: LineageEntry) => {
@@ -620,7 +764,7 @@ export class WorkflowExecutor {
     const setPointer: SessionArtifactPointerSetter = (key, id) => {
       this.session = setArtifactPointer(this.session, key, id);
     };
-    const phaseModel = this.modelForPhase?.(stageImpl.id) ?? this.model;
+    const phaseModel = this.modelForPhase?.(stageId) ?? this.model;
     const base = {
       store: this.store,
       appendLineage,
@@ -644,7 +788,6 @@ export class WorkflowExecutor {
     // has the live `session` getter) so the assignment preserves the getter
     // — copying via `{...base}` would call the getter once and freeze the
     // value at build time.
-    void stageImpl; // marker — adapter-specific extras are stage-agnostic in Phase 1
     Object.assign(base, this.contextExtras);
     return base as StageContext;
   }

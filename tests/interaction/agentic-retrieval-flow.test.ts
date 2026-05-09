@@ -512,7 +512,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(serialized).not.toContain('session !== null && typeof session');
   });
 
-  test('retrievalDispatch surfaces source_access_events from the agent\'s read_file actions', async () => {
+  test("retrievalDispatch surfaces source_access_events from the agent's read_file actions", async () => {
     // Wire the dispatch so the bounded retriever-agent issues a read_file
     // action against a known file (round 1: continue + actions; round 2:
     // stop with a recommendation). The dispatch result should carry
