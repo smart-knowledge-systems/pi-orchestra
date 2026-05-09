@@ -51,6 +51,7 @@ import {
 } from './session-state.ts';
 import type {
   LineageAppend,
+  SessionArtifactPointerSetter,
   Stage,
   StageAdvisorCall,
   StageContext,
@@ -598,21 +599,35 @@ export class WorkflowExecutor {
       }
       this.session = appendLineageEntry(this.session, entry);
     };
-    const base: StageContext = {
+    const setPointer: SessionArtifactPointerSetter = (key, id) => {
+      this.session = setArtifactPointer(this.session, key, id);
+    };
+    const base = {
       store: this.store,
-      session: this.session,
       appendLineage,
+      setArtifactPointer: setPointer,
       model: this.model,
       ...(this.advisor ? { advisor: this.advisor } : {}),
       ...(this.telemetry ? { telemetry: this.telemetry } : {}),
       ...(this.signal ? { signal: this.signal } : {}),
     };
+    // `session` is a getter so adapters that mutate the session via
+    // `setArtifactPointer` see their own changes when they re-read
+    // `ctx.session.artifacts.*`.
+    Object.defineProperty(base, 'session', {
+      get: () => this.session,
+      enumerable: true,
+    });
     // Spread adapter extras (retriever-agent model, runtime config, allowEdits,
     // synthesisTaskType) into the context so adapters that cast to
     // StageAdapterContext can read them. The adapters are responsible for
-    // ignoring extras they do not need.
+    // ignoring extras they do not need. We Object.assign onto `base` (which
+    // has the live `session` getter) so the assignment preserves the getter
+    // — copying via `{...base}` would call the getter once and freeze the
+    // value at build time.
     void stageImpl; // marker — adapter-specific extras are stage-agnostic in Phase 1
-    return Object.assign({}, base, this.contextExtras) as StageContext;
+    Object.assign(base, this.contextExtras);
+    return base as StageContext;
   }
 
   /**

@@ -117,6 +117,20 @@ export type StageAdvisorCall = (
 export type LineageAppend = (entry: LineageEntry) => void;
 
 /**
+ * Update an artifact-pointer slot on the session state.
+ *
+ * Stages that produce intermediate artifacts during a UI loop (e.g. the
+ * restatement adapter writing a fresh `intent-capture@1` when the user
+ * corrects the restated intent) need to keep the session's pointer slots in
+ * sync so downstream stages see the latest artifact id. The executor binds
+ * this seam to its working session-state copy.
+ */
+export type SessionArtifactPointerSetter = (
+  key: keyof SessionState['artifacts'],
+  id: string,
+) => void;
+
+/**
  * StageContext — everything a Stage's `run()` needs from the runtime.
  *
  * Existing controllers reach for: the artifact store (read inputs, write
@@ -136,6 +150,9 @@ export interface StageContext {
 
   /** Append-only lineage seam. */
   readonly appendLineage: LineageAppend;
+
+  /** Update an artifact-pointer slot on the session state. */
+  readonly setArtifactPointer?: SessionArtifactPointerSetter;
 
   /** Resolve a single model call for the active phase. */
   readonly model: StageModelCall;
