@@ -166,8 +166,24 @@ export interface WorkflowExecutorOptions {
    * stages fire; lineage is appended.
    */
   session: SessionState;
-  /** Resolves a single model call for the active phase. */
+  /**
+   * Resolves a single model call for the active phase.
+   *
+   * Pre-COMP-P2-T3 hosts pass a single `StageModelCall` here and the
+   * executor injects it into every Stage's `ctx.model`. Phase-aware hosts
+   * pass `modelForPhase` as well; when both are supplied, the executor
+   * prefers `modelForPhase(stageId)` per stage and falls back to `model`
+   * only when `modelForPhase` returns `undefined`.
+   */
   model: StageModelCall;
+  /**
+   * Optional phase-aware model resolver. Returns the `StageModelCall` to
+   * inject into a Stage's `ctx.model`; return `undefined` to fall back to
+   * the static `model` seam. This is the canonical Phase 2 wiring per
+   * `docs/composability.md` "Phase 2 — `getModelText` takes a phase
+   * parameter".
+   */
+  modelForPhase?: (phase: string) => StageModelCall | undefined;
   /** Optional advisor resolver. Phase 2 wires the real implementation. */
   advisor?: StageAdvisorCall;
   /** Optional telemetry sink. */
@@ -383,6 +399,7 @@ export class WorkflowExecutor {
   private readonly store: ArtifactStore;
   private session: SessionState;
   private readonly model: StageModelCall;
+  private readonly modelForPhase?: (phase: string) => StageModelCall | undefined;
   private readonly advisor?: StageAdvisorCall;
   private readonly telemetry?: StageTelemetry;
   private readonly signal?: AbortSignal;
@@ -395,6 +412,7 @@ export class WorkflowExecutor {
     this.store = options.store;
     this.session = options.session;
     this.model = options.model;
+    if (options.modelForPhase) this.modelForPhase = options.modelForPhase;
     this.advisor = options.advisor;
     this.telemetry = options.telemetry;
     this.signal = options.signal;
@@ -602,11 +620,12 @@ export class WorkflowExecutor {
     const setPointer: SessionArtifactPointerSetter = (key, id) => {
       this.session = setArtifactPointer(this.session, key, id);
     };
+    const phaseModel = this.modelForPhase?.(stageImpl.id) ?? this.model;
     const base = {
       store: this.store,
       appendLineage,
       setArtifactPointer: setPointer,
-      model: this.model,
+      model: phaseModel,
       ...(this.advisor ? { advisor: this.advisor } : {}),
       ...(this.telemetry ? { telemetry: this.telemetry } : {}),
       ...(this.signal ? { signal: this.signal } : {}),

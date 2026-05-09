@@ -21,7 +21,13 @@ import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-age
 import { ArtifactStore } from '../src/artifacts/store.ts';
 import { runDefaultPipeline } from '../src/conductor/default-pipeline.ts';
 import { StageMachine } from '../src/conductor/stage-machine.ts';
-import { createConfig, type PiOrchestraConfig } from '../src/runtime/config.ts';
+import {
+  createConfig,
+  resolvePhaseModelConfig,
+  type PhaseExecutor,
+  type PiOrchestraConfig,
+  type PipelinePhaseId,
+} from '../src/runtime/config.ts';
 import type { AgentModelCallback } from '../src/retriever/agent-types.ts';
 
 type OrchestraRuntime = {
@@ -59,14 +65,76 @@ async function getMachine(): Promise<StageMachine> {
   return runtime.machineReady;
 }
 
-async function getModelText(systemPrompt: string, userText: string, ctx: ExtensionContext) {
+/**
+ * Tracks which phases have already received a `ctx.model` deprecation
+ * warning so the log is informative once per process lifetime per phase
+ * rather than on every model call.
+ */
+const ctxModelDeprecationWarned = new Set<string>();
+
+/**
+ * Resolve the executor `Model<Api>` for the given phase.
+ *
+ * Per `docs/composability.md` "Phase 2 — `getModelText` takes a phase
+ * parameter", we look up `runtime.config.models[phase].executor` first.
+ * When no per-phase executor is configured (or the phase is omitted), we
+ * fall back to `ctx.model` and emit a deprecation warning the first time
+ * each phase trips the fallback path. The fallback is documented as
+ * intentionally surviving "one minor version" so existing hosts keep
+ * working while they migrate to per-phase configuration.
+ */
+type ResolvedModel = NonNullable<ExtensionContext['model']>;
+
+function resolveExecutorModel(
+  ctx: ExtensionContext,
+  phase: PipelinePhaseId | string | undefined,
+): ResolvedModel {
+  if (phase) {
+    const phaseConfig = resolvePhaseModelConfig(runtime.config, phase as PipelinePhaseId);
+    const executor: PhaseExecutor | undefined = phaseConfig?.executor;
+    if (executor) {
+      const found = ctx.modelRegistry.find(executor.provider, executor.model);
+      if (found) return found;
+      throw new Error(
+        `Conductor model call: phase "${phase}" requested executor ` +
+          `${executor.provider}/${executor.model} but the model registry does not know it`,
+      );
+    }
+  }
+
   if (!ctx.model) {
     throw new Error('No model selected for conductor model call');
   }
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+  const fallbackKey = phase ?? '__no_phase__';
+  if (!ctxModelDeprecationWarned.has(fallbackKey)) {
+    ctxModelDeprecationWarned.add(fallbackKey);
+    const detail = phase
+      ? `phase "${phase}" has no models[${phase}].executor entry`
+      : 'caller did not pass a phase id';
+    void logEvent('runtime.ctx_model_deprecated', {
+      phase: phase ?? null,
+      detail,
+      message:
+        `[piorx] ctx.model fallback used for ${detail}; ` +
+        `populate runtime.config.models[<phase>].executor (Phase 2). ` +
+        `This fallback survives one minor version per docs/composability.md.`,
+    });
+  }
+  return ctx.model;
+}
+
+async function getModelText(
+  systemPrompt: string,
+  userText: string,
+  ctx: ExtensionContext,
+  phase?: PipelinePhaseId | string,
+) {
+  const model = resolveExecutorModel(ctx, phase);
+
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok || !auth.apiKey) {
-    throw new Error(auth.ok ? `No API key for ${ctx.model.provider}` : auth.error);
+    throw new Error(auth.ok ? `No API key for ${model.provider}` : auth.error);
   }
 
   const userMessage: UserMessage = {
@@ -76,7 +144,7 @@ async function getModelText(systemPrompt: string, userText: string, ctx: Extensi
   };
 
   const response = await complete(
-    ctx.model,
+    model,
     {
       systemPrompt,
       messages: [userMessage],
@@ -108,9 +176,15 @@ async function getModelText(systemPrompt: string, userText: string, ctx: Extensi
 /**
  * Model callback injected into the retriever agent loop. The callback lives
  * at the extension edge so `src/retriever/**` never imports pi host APIs.
+ *
+ * Pinned to `'retrieval'` per COMP-P2-T3 so the runtime resolves the
+ * configured retrieval executor (and emits the deprecation warning when no
+ * `models.retrieval.executor` is configured) instead of silently using
+ * `ctx.model`.
  */
 function makeRetrieverAgentModel(ctx: ExtensionContext): AgentModelCallback {
-  return async ({ systemPrompt, userPrompt }) => getModelText(systemPrompt, userPrompt, ctx);
+  return async ({ systemPrompt, userPrompt }) =>
+    getModelText(systemPrompt, userPrompt, ctx, 'retrieval');
 }
 
 /**
@@ -142,7 +216,8 @@ async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContex
     config: runtime.config,
     ui: makePipelineUI(ctx),
     logEvent,
-    getModelText: (systemPrompt, userText) => getModelText(systemPrompt, userText, ctx),
+    getModelText: (systemPrompt, userText, phase) =>
+      getModelText(systemPrompt, userText, ctx, phase),
     retrieverAgentModel: makeRetrieverAgentModel(ctx),
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   });

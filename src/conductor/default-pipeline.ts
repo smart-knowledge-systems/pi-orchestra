@@ -23,7 +23,7 @@
 import { resolve } from 'node:path';
 import type { ArtifactStore } from '../artifacts/store.ts';
 import type { ExpandedSpec, ExpansionInputV1, IntentFileRef } from '../artifacts/types.ts';
-import type { PiOrchestraConfig } from '../runtime/config.ts';
+import type { PipelinePhaseId, PiOrchestraConfig } from '../runtime/config.ts';
 import { WorkflowRegistry, registerDefaultGates } from '../runtime/registry.ts';
 import { loadWorkflowFromFile } from '../runtime/workflow-loader.ts';
 import { WorkflowExecutor, type WorkflowRunResult } from '../runtime/workflow-executor.ts';
@@ -76,10 +76,19 @@ export interface DefaultPipelineDeps {
   ui: PipelineUI;
   logEvent: PipelineLogger;
   /**
-   * Generic model callback. The default-pipeline wraps it into the
-   * stage-specific `restate` / `expand` callbacks for the adapters.
+   * Phase-aware model callback. The host resolves the executor from
+   * `runtime.config.models[phase]` per `docs/composability.md` "Phase 2";
+   * pre-Phase-2 hosts that omit the per-phase config still work because
+   * the host emits a one-shot deprecation warning and falls back to
+   * `ctx.model`. The default-pipeline forwards the phase id of each call
+   * site (`'restatement'`, `'expansion'`, etc.) so the host's resolver
+   * sees the active phase verbatim.
    */
-  getModelText(systemPrompt: string, userText: string): Promise<string>;
+  getModelText(
+    systemPrompt: string,
+    userText: string,
+    phase: PipelinePhaseId | string,
+  ): Promise<string>;
   retrieverAgentModel: AgentModelCallback;
   /**
    * Optional abort signal forwarded from the host. Surfaces through the
@@ -139,11 +148,18 @@ async function executeWorkflow(
   meta: AdapterIntentMetadata,
 ): Promise<ExecuteResult> {
   const session = loadSession(deps.config);
+  // The static `model` seam preserves backward-compat callers that wrap a
+  // pre-Phase-2 generic resolver; `modelForPhase` is the canonical Phase 2
+  // wiring per docs/composability.md "Phase 2 — getModelText takes a phase
+  // parameter", so a stage's `ctx.model(systemPrompt, userText)` resolves
+  // through the host's per-phase configuration.
   const executor = new WorkflowExecutor({
     registry,
     store: deps.store,
     session,
-    model: deps.getModelText,
+    model: (systemPrompt, userText) => deps.getModelText(systemPrompt, userText, 'unknown'),
+    modelForPhase: (phase) => (systemPrompt, userText) =>
+      deps.getModelText(systemPrompt, userText, phase),
     ...(deps.signal ? { signal: deps.signal } : {}),
     contextExtras: {
       runtimeConfig: deps.config,
@@ -170,7 +186,11 @@ function loadSession(config: PiOrchestraConfig): SessionState {
 function makeRestateCallback(getModelText: DefaultPipelineDeps['getModelText']): AdapterRestate {
   return async ({ cleanedIntent, contextBlock }) => {
     const userText = contextBlock ? `${cleanedIntent}\n\n${contextBlock}` : cleanedIntent;
-    return getModelText(`${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`, userText);
+    return getModelText(
+      `${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`,
+      userText,
+      'restatement',
+    );
   };
 }
 
@@ -194,6 +214,7 @@ Return JSON only with this exact shape:
 }
 Do not wrap the JSON in prose. Keep arrays compact and practical.${strictRetry ? '\nThis is a retry because the previous response was malformed. Output a single valid JSON object only. No markdown fences. No commentary. No trailing text.' : ''}`,
       JSON.stringify(input, null, 2),
+      'expansion',
     );
     const parsed = parseExpandedSpec(raw, input);
     await logEvent('stage2.expansion_parse', {
