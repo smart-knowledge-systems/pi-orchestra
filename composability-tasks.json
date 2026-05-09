@@ -343,7 +343,7 @@
       "deliverable": "Real LLM-driven synthesis worker producing schema-validated analysis-report or change-spec output",
       "files": ["src/synthesis/worker.ts"],
       "dependencies": ["COMP-P2-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Worker produces analysis-report@1 or change-spec@1 artifacts that validate structurally",
         "output_config.format is derived from the existing artifact validators (no parallel schema authoring)",
@@ -360,7 +360,7 @@
       "deliverable": "Advisor-aware synthesis prompt + opt-in advisor-review gate registered",
       "files": ["src/synthesis/prompt.ts", "src/runtime/registry.ts"],
       "dependencies": ["COMP-P3-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "ADVISOR_TOOL_INSTRUCTIONS block appears verbatim when advisor is enabled and is omitted otherwise",
         "synthesis.advisor-review gate is registered and runs only when explicitly enabled",
@@ -380,7 +380,7 @@
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
       "dependencies": ["COMP-P3-T1", "COMP-P3-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Snapshot tests cover both task types (analysis-report and change-spec)",
         "Existing E2E passes with advisor disabled",

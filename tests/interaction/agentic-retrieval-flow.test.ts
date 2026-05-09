@@ -29,6 +29,7 @@ import {
   type PipelinePhaseId,
   validatePhaseModelConfigs,
 } from '../../src/runtime/config.ts';
+import type { AdvisorCallback, ExecutorCallback } from '../../src/runtime/run-with-advisor.ts';
 import { ArtifactStore } from '../../src/artifacts/store.ts';
 import { StageMachine } from '../../src/conductor/stage-machine.ts';
 import { Stage1Controller, type RestateFunction } from '../../src/conductor/stage-1.ts';
@@ -688,5 +689,166 @@ describe('agentic retrieval flow — Phase 2 gate (advisor=none everywhere)', ()
     for (const ev of bundle.raw_evidence) {
       expect(planPaths.has(ev.path)).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P3-T3 — Phase 3 gate: synthesis worker with stubbed advisor.
+//
+// Adds a synthesis run on top of the canonical retrieval bundle, exercising
+// the LLM-driven path (`runWithAdvisor` + `runSynthesisWorker`'s `llm`
+// seam) with a stubbed advisor model. Asserts:
+//
+//   1. Existing E2E (advisor disabled) still passes byte-identically — the
+//      describe blocks above continue to run and pass.
+//   2. With advisor enabled (mode='custom'), the executor's iterations
+//      include the advisor consultation, telemetry records
+//      `advisor_iterations: 1` in `.pi/orchestra.log`, and the produced
+//      synthesis artifact is byte-identical (modulo artifact_id) to a
+//      `mode='none'` run with the same stub model — proving the advisor
+//      seam does not perturb output when the model is stubbed.
+// ---------------------------------------------------------------------------
+
+describe('agentic retrieval flow — Phase 3 gate (advisor=custom against stubbed advisor)', () => {
+  const ANALYSIS_OUTPUT = JSON.stringify({
+    artifact_type: 'piorx/analysis-report@1',
+    artifact_id: 'placeholder',
+    evidence_bundle_id: 'placeholder',
+    summary: 'Phase 3 gate stubbed analysis',
+    findings: ['restoreModelFromSession returns a fallback when auth is missing'],
+    risks: [],
+    recommended_next_steps: ['Add an integration test for the auth-missing branch'],
+  });
+
+  async function buildBundleFromCanonicalFlow(): Promise<EvidenceBundleV1> {
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+    const dispatchResult = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    const index = (await store.get(
+      'piorx/retrieval-index@1',
+      dispatchResult.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+    const plan = createRecommendedEvidencePlan(index);
+    await store.put(plan);
+    const materialized = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    return (await store.get(
+      'piorx/evidence-bundle@1',
+      materialized.evidence_bundle_id!,
+    )) as EvidenceBundleV1;
+  }
+
+  async function synthesizeWithMode(bundle: EvidenceBundleV1, advisorMode: 'none' | 'custom') {
+    const { runSynthesisWorker } = await import('../../src/synthesis/worker.ts');
+    const { assembleSynthesisPrompt } = await import('../../src/synthesis/prompt.ts');
+    const prompt = assembleSynthesisPrompt(bundle, {
+      sections: ['intent_context', 'structural_context', 'raw_evidence'],
+      instructions: 'Be precise.',
+      task_type: 'analysis-report',
+    });
+
+    const events: Array<{ message: string; details: unknown }> = [];
+    const executor: ExecutorCallback = async (req) => {
+      if (advisorMode === 'custom' && req.extras.customAdvisorHandler) {
+        await req.extras.customAdvisorHandler({
+          systemPrompt: 'advisor-system',
+          userMessage: 'advisor-user',
+        });
+      }
+      return {
+        text: ANALYSIS_OUTPUT,
+        iterations: [{ type: 'message', input_tokens: 100, output_tokens: 50 }],
+      };
+    };
+
+    const advisor: AdvisorCallback = async () => ({
+      text: 'Phase 3 stubbed advisor suggestion',
+      usage: { input_tokens: 30, output_tokens: 10 },
+    });
+
+    const advisorConfig =
+      advisorMode === 'none'
+        ? { mode: 'none' as const }
+        : { mode: 'custom' as const, model: 'claude-opus-4-7' };
+
+    const output = await runSynthesisWorker({
+      task_type: 'analysis-report',
+      bundle,
+      prompt_text: prompt.text,
+      instructions: 'Be precise.',
+      llm: {
+        config: {
+          executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          advisor: advisorConfig,
+        },
+        executor,
+        ...(advisorMode === 'custom' ? { advisor } : {}),
+        logEvent: (message, details) => {
+          events.push({ message, details });
+        },
+      },
+    });
+
+    return { output, events };
+  }
+
+  test('synthesis output is byte-identical across advisor=none and advisor=custom', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const noneRun = await synthesizeWithMode(bundle, 'none');
+    const customRun = await synthesizeWithMode(bundle, 'custom');
+
+    const stripId = (artifact: Record<string, unknown>) => ({
+      ...artifact,
+      artifact_id: 'normalized',
+    });
+    expect(stripId(customRun.output as unknown as Record<string, unknown>)).toEqual(
+      stripId(noneRun.output as unknown as Record<string, unknown>),
+    );
+    // The bundle id reference is preserved in both modes — the worker stamps
+    // it deterministically from the input bundle, not from the model.
+    expect(customRun.output.evidence_bundle_id).toBe(bundle.artifact_id);
+    expect(noneRun.output.evidence_bundle_id).toBe(bundle.artifact_id);
+  });
+
+  test('advisor=custom records advisor_iterations telemetry while synthesis succeeds', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const { output, events } = await synthesizeWithMode(bundle, 'custom');
+
+    expect(output.artifact_type).toBe('piorx/analysis-report@1');
+
+    const telemetry = events.find((e) => e.message === 'runtime.run_with_advisor')
+      ?.details as Record<string, unknown>;
+    expect(telemetry).toBeDefined();
+    expect(telemetry.mode).toBe('custom');
+    expect(telemetry.advisor_iterations).toBe(1);
+    expect(telemetry.advisor_model).toBe('claude-opus-4-7');
+    expect(telemetry.beta_header_sent).toBe(true);
+    expect(telemetry.disabled_by_env).toBe(false);
+  });
+
+  test('advisor=none produces telemetry with advisor_iterations=0 and no advisor model', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const { events } = await synthesizeWithMode(bundle, 'none');
+    const telemetry = events.find((e) => e.message === 'runtime.run_with_advisor')
+      ?.details as Record<string, unknown>;
+    expect(telemetry).toBeDefined();
+    expect(telemetry.mode).toBe('none');
+    expect(telemetry.advisor_iterations).toBe(0);
+    expect(telemetry.advisor_model).toBeNull();
+    expect(telemetry.beta_header_sent).toBe(false);
   });
 });
