@@ -512,6 +512,129 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(serialized).not.toContain('session !== null && typeof session');
   });
 
+  test('retrievalDispatch surfaces source_access_events from the agent\'s read_file actions', async () => {
+    // Wire the dispatch so the bounded retriever-agent issues a read_file
+    // action against a known file (round 1: continue + actions; round 2:
+    // stop with a recommendation). The dispatch result should carry
+    // `source_access_events` with the file path, the requested line
+    // count as the budget, and the action's `reason` — the audit data the
+    // retrieval stage adapter folds into lineage so the default workflow's
+    // `evidence_requirements: ['source-access-events']` is actually populated
+    // end-to-end (not just declared).
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    const READ_PATH = 'src/core/model-resolver.ts';
+    const READ_REASON = 'inspecting restoreModelFromSession definition';
+    const READ_LINES = 20;
+
+    const continueResponse = JSON.stringify({
+      status: 'continue',
+      summary: 'reading the tagged target',
+      actions: [
+        {
+          type: 'read_file',
+          path: READ_PATH,
+          mode: 'window',
+          start: 1,
+          count: READ_LINES,
+          reason: READ_REASON,
+        },
+      ],
+    });
+
+    const stopResponse = JSON.stringify({
+      status: 'stop',
+      summary: 'narrowed to the read target',
+      recommendation: {
+        strategy_summary: 'Confirmed the tagged file defines the target symbol.',
+        files: [
+          {
+            path: READ_PATH,
+            tier: 'selected',
+            default_evidence_mode: 'spans',
+            selection_reason: 'defines restoreModelFromSession',
+            include_ast_skeleton: true,
+            include_retriever_summary: true,
+            include_entire_file: false,
+            symbols: [
+              {
+                name: 'restoreModelFromSession',
+                start: 3,
+                count: 5,
+                selected_by_default: true,
+                default_neighbor_lines: 1,
+                selection_reason: 'primary target span',
+              },
+            ],
+          },
+        ],
+        cross_file_findings: [],
+        gaps: [],
+        followup_queries: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+        confidence: 'high',
+      },
+    });
+
+    const responses = [continueResponse, stopResponse];
+    let callIdx = 0;
+    const retrieverAgentModel: AgentModelCallback = async () => {
+      const response = responses[callIdx] ?? stopResponse;
+      callIdx++;
+      return response;
+    };
+
+    const dispatch = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+      { retrieverAgentModel },
+    );
+
+    expect(dispatch.status).toBe('success');
+    expect(dispatch.message).toContain('agent rounds=2');
+    expect(dispatch.source_access_events).toBeDefined();
+    const events = dispatch.source_access_events!;
+    expect(events.length).toBeGreaterThanOrEqual(1);
+
+    const targetEvent = events.find((e) => e.file_path === READ_PATH);
+    expect(targetEvent).toBeDefined();
+    // budget.lines reflects the lines actually returned by the executor, not
+    // the requested count — bounded by file length and the agent's
+    // maxLinesPerRead. The audit trail records what was read, not what was
+    // asked for.
+    expect(targetEvent!.budget?.lines).toBeGreaterThan(0);
+    expect(targetEvent!.budget?.lines).toBeLessThanOrEqual(READ_LINES);
+    expect(targetEvent!.reason).toBe(READ_REASON);
+    // read_at is an ISO timestamp the dispatch stamps when extracting the
+    // event from the agent trace; the exact value is wall-clock so we just
+    // confirm it parses as a date.
+    expect(Number.isFinite(Date.parse(targetEvent!.read_at))).toBe(true);
+
+    // Scout-only dispatch (no model callback) carries no source-access
+    // events because there's no agent trace to extract from. Proves the
+    // events are agent-trace-derived, not scout-derived (which would over-
+    // report bulk file scoring as an audit signal).
+    const scoutOnly = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(scoutOnly.status).toBe('success');
+    expect(scoutOnly.source_access_events).toBeUndefined();
+  });
+
   test('agent-driven bundle materializes only the agent-selected evidence', async () => {
     const repoDir = join(tempDir, 'repo');
     await writeDistractorFiles(repoDir);
