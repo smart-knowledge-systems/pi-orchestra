@@ -10,3 +10,4 @@ coverage/
 .bun/
 .pi/
 *.bak
+composability-dev-log.txt
