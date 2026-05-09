@@ -12,10 +12,7 @@
       "scope": "medium",
       "description": "Promote the workflow definition to a first-class typed artifact. Add the WorkflowSpecV1 type with id, name, description, goals, stages, edges (with structured when predicates and natural-language description), recursive_promotion_target, operating_mode, mandatory_controls, governance sub-block, extends, stage_overrides, workflow_ref / inline workflow for nested sub-workflows. Add the runtime structural validator. Referential checks (stage id resolution, artifact type resolution, gate id resolution) layer on top in the registry, not here.",
       "deliverable": "WorkflowSpecV1 artifact type and structural runtime validator landed in the artifact kernel",
-      "files": [
-        "src/artifacts/types.ts",
-        "src/artifacts/schemas.ts"
-      ],
+      "files": ["src/artifacts/types.ts", "src/artifacts/schemas.ts"],
       "dependencies": [],
       "status": "completed",
       "acceptance_criteria": [
@@ -40,7 +37,7 @@
         "tests/fixtures/sample-artifacts/"
       ],
       "dependencies": [],
-      "status": "in_progress",
+      "status": "completed",
       "acceptance_criteria": [
         "Every artifact_type literal in source is namespaced (piorx/<name>@<version>)",
         "Store paths and fixture files reflect the new ids",
@@ -55,12 +52,8 @@
       "scope": "short",
       "description": "Create src/runtime/stage.ts with the Stage<InId, OutId> interface, StageContext (store, lineage append, model resolver, advisor resolver, telemetry), StageResult, StageControl (entry_criteria, exit_criteria, acceptance_criteria, failure_handling, evidence_requirements). PhaseModelConfig is referenced as an optional field but lives in src/runtime/config.ts (Phase 2 lands the actual type).",
       "deliverable": "Stage primitive types ready for stage-controller adoption",
-      "files": [
-        "src/runtime/stage.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T1"
-      ],
+      "files": ["src/runtime/stage.ts"],
+      "dependencies": ["COMP-P1-T1"],
       "status": "completed",
       "acceptance_criteria": [
         "Stage interface is generic over input/output artifact-type ids",
@@ -76,12 +69,8 @@
       "scope": "short",
       "description": "Create src/runtime/gate.ts with GateSpec (id, presents, validateOverride, applyOverride), GateOp base type, GateOpValidation, and GateOutcome as a discriminated union of accepted | rejected_governance | rejected_technical | escalated (with routing field workflow_owner | policy_authority | user). Generalizes the EvidenceOverride pattern from src/conductor/evidence-overrides.ts without yet touching that file.",
       "deliverable": "Gate primitive types with four-way outcome routing",
-      "files": [
-        "src/runtime/gate.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T3"
-      ],
+      "files": ["src/runtime/gate.ts"],
+      "dependencies": ["COMP-P1-T3"],
       "status": "completed",
       "acceptance_criteria": [
         "GateOutcome distinguishes technical failure, governance failure, and escalation",
@@ -97,14 +86,9 @@
       "scope": "medium",
       "description": "Create src/runtime/registry.ts. Loads workflow specs (piorx-shipped only in Phase 1), registers Stage implementations against stage ids declared in the spec, validates referential integrity at boot (every stage has an implementation; every input/output is a known artifact type; every gate id is registered). Enforces extension conformance: extensions cannot remove or weaken mandatory_controls; cannot register a stage id that overlaps an existing stage with weaker access policy; nested sub-workflow operating_mode must be <= parent's; mandatory_controls propagate downward additively only; cycles rejected; max nesting depth (default 3) registry-configurable. Platform policy prevails over workflow configuration on conflict.",
       "deliverable": "WorkflowRegistry singleton with boot-time validation and conformance enforcement",
-      "files": [
-        "src/runtime/registry.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T3",
-        "COMP-P1-T4"
-      ],
-      "status": "planned",
+      "files": ["src/runtime/registry.ts"],
+      "dependencies": ["COMP-P1-T3", "COMP-P1-T4"],
+      "status": "completed",
       "acceptance_criteria": [
         "Boot-time validation fails loudly when a Stage's input/output disagrees with the workflow spec",
         "An extension that removes or weakens a mandatory_controls gate is rejected at boot",
@@ -119,12 +103,8 @@
       "scope": "medium",
       "description": "Hand-author src/runtime/workflows/piorx-default.workflow.md as a piorx/workflow-spec@1 artifact. YAML frontmatter declares shape (kind, id, name, description, operating_mode: supervised-change, mandatory_controls: [intent.approval, execution.allow_edits], goals, stages with model_class and gates, edges with structured when and natural-language description, governance sub-block, recursive_promotion_target: restatement). Markdown body expands each YAML field in plain English; conventional sections are ## Operating mode, ## Goals, ## Stages (one H3 per stage matching stages[].id), optional ## Edges and ## Governance. The natural-language fields are load-bearing for agent-readability.",
       "deliverable": "Default piorx workflow as a schema-validated markdown spec, source of truth for workflow shape and intent",
-      "files": [
-        "src/runtime/workflows/piorx-default.workflow.md"
-      ],
-      "dependencies": [
-        "COMP-P1-T1"
-      ],
+      "files": ["src/runtime/workflows/piorx-default.workflow.md"],
+      "dependencies": ["COMP-P1-T1"],
       "status": "completed",
       "acceptance_criteria": [
         "Spec validates as piorx/workflow-spec@1 at boot",
@@ -141,13 +121,8 @@
       "scope": "medium",
       "description": "Create src/runtime/workflow-executor.ts. Linear-with-conditional-edges traversal of the active workflow spec; resolves Stage implementations from the registry; runs gates in registration order after each stage and routes the four-way outcome; handles recursive promotion to the recursive_promotion_target stage. Replaces the orchestration logic in extensions/conductor-extension.ts:1040-1167.",
       "deliverable": "WorkflowExecutor capable of running the default workflow spec end-to-end",
-      "files": [
-        "src/runtime/workflow-executor.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T5",
-        "COMP-P1-T6"
-      ],
+      "files": ["src/runtime/workflow-executor.ts"],
+      "dependencies": ["COMP-P1-T5", "COMP-P1-T6"],
       "status": "planned",
       "acceptance_criteria": [
         "Executor.run(workflowId, initialInput, ctx) walks the spec, executes stages, runs gates, and returns the final artifact",
@@ -171,11 +146,8 @@
         "src/conductor/recursive-intent.ts",
         "src/services/evidence-assembler.ts"
       ],
-      "dependencies": [
-        "COMP-P1-T3",
-        "COMP-P1-T6"
-      ],
-      "status": "planned",
+      "dependencies": ["COMP-P1-T3", "COMP-P1-T6"],
+      "status": "completed",
       "acceptance_criteria": [
         "Each existing controller is reachable via the registry by its stage id",
         "Behavior is identical to today (byte-for-byte artifact graph on the existing E2E)",
@@ -190,12 +162,8 @@
       "scope": "short",
       "description": "src/conductor/stage-machine.ts:32-40 currently encodes a literal whitelist of stage transitions. Replace with a runtime validator that derives valid transitions from the active workflow spec's edge list. The transition table becomes generated, not authored.",
       "deliverable": "Stage machine that derives transitions from the workflow spec rather than encoding them",
-      "files": [
-        "src/conductor/stage-machine.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T7"
-      ],
+      "files": ["src/conductor/stage-machine.ts"],
+      "dependencies": ["COMP-P1-T7"],
       "status": "planned",
       "acceptance_criteria": [
         "stage-machine.ts no longer contains a static transition map",
@@ -211,14 +179,8 @@
       "scope": "short",
       "description": "src/conductor/evidence-overrides.ts re-exports its EvidenceOverride union as the first concrete GateOp implementation. Register the evidence.review GateSpec against the evidence stage id. No semantic change — this is a typing and registration migration that proves the gate primitive against the existing reference implementation.",
       "deliverable": "evidence.review gate registered and resolved through the new gate primitive",
-      "files": [
-        "src/conductor/evidence-overrides.ts",
-        "src/runtime/registry.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T4",
-        "COMP-P1-T5"
-      ],
+      "files": ["src/conductor/evidence-overrides.ts", "src/runtime/registry.ts"],
+      "dependencies": ["COMP-P1-T4", "COMP-P1-T5"],
       "status": "planned",
       "acceptance_criteria": [
         "EvidenceOverride union is exported as a concrete GateOp",
@@ -234,14 +196,8 @@
       "scope": "short",
       "description": "extensions/conductor-extension.ts:1040-1167 currently hardcodes the six-stage pipeline. Replace the body with workflowExecutor.run('piorx/workflow/default@1', initialIntent, ctx). The function shrinks dramatically; orchestration moves into WorkflowExecutor. Remove dead orchestration code paths.",
       "deliverable": "Pipeline orchestration driven by the workflow spec, no longer encoded inline",
-      "files": [
-        "extensions/conductor-extension.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T7",
-        "COMP-P1-T8",
-        "COMP-P1-T10"
-      ],
+      "files": ["extensions/conductor-extension.ts"],
+      "dependencies": ["COMP-P1-T7", "COMP-P1-T8", "COMP-P1-T10"],
       "status": "planned",
       "acceptance_criteria": [
         "runPipelineFromIntent is a thin call into the workflow executor",
@@ -257,12 +213,8 @@
       "scope": "short",
       "description": "src/runtime/session-state.ts:46-67 lineage[] entries gain: stage id, gate decisions (with the four-way GateOutcome), the role that signed each decision (requestor / reviewer / execution_authority — even when one user fills all three, the role is recorded for forward-compat), the workflow_spec_id active at run time (so re-running against a different spec version is reconstructable), and source-access events surfaced from worker boundaries (which file was read by which stage at which budget). Forward-compatible with multi-stakeholder governance without forcing it now.",
       "deliverable": "Lineage records the data needed for governance forward-compatibility and source-access auditing",
-      "files": [
-        "src/runtime/session-state.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T6"
-      ],
+      "files": ["src/runtime/session-state.ts"],
+      "dependencies": ["COMP-P1-T6"],
       "status": "planned",
       "acceptance_criteria": [
         "Each lineage entry carries stage id, gate outcome (with kind), role, and workflow_spec_id",
@@ -282,11 +234,7 @@
         "tests/runtime/workflow-executor.test.ts",
         "tests/runtime/control-baseline.test.ts"
       ],
-      "dependencies": [
-        "COMP-P1-T7",
-        "COMP-P1-T11",
-        "COMP-P1-T12"
-      ],
+      "dependencies": ["COMP-P1-T7", "COMP-P1-T11", "COMP-P1-T12"],
       "status": "planned",
       "acceptance_criteria": [
         "workflow-executor.test.ts has >= 10 assertions covering edges, gates, conditional routing, and drift",
@@ -306,10 +254,7 @@
         "tests/runtime/workflow-spec-readability.test.ts",
         "tests/runtime/extension-conformance.test.ts"
       ],
-      "dependencies": [
-        "COMP-P1-T5",
-        "COMP-P1-T6"
-      ],
+      "dependencies": ["COMP-P1-T5", "COMP-P1-T6"],
       "status": "planned",
       "acceptance_criteria": [
         "Readability test asks five canonical questions and passes against the default workflow",
@@ -325,12 +270,8 @@
       "scope": "short",
       "description": "src/runtime/config.ts (currently paths-only) gains PhaseModelConfig (executor + optional advisor with mode|model|maxUses|caching), AdvisorConfig, and a models block keyed by phase: { restatement, expansion, retrieval, synthesis, execution }. Validator refuses non-canonical executor/advisor pairs by default (advisor doc 3.2 + 4.1 — API matrix is authoritative). Replaces the ctx.model bottleneck.",
       "deliverable": "Per-phase model and advisor configuration in runtime config with validator",
-      "files": [
-        "src/runtime/config.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T11"
-      ],
+      "files": ["src/runtime/config.ts"],
+      "dependencies": ["COMP-P1-T11"],
       "status": "planned",
       "acceptance_criteria": [
         "models block declares an executor for every default-pipeline phase",
@@ -346,13 +287,8 @@
       "scope": "medium",
       "description": "src/runtime/run-with-advisor.ts: the helper from advisor doc section 7 Phase B. Three modes — inline (deterministic pre-call), custom (pi-ai tool-loop, default; preserves per-side-call billing), server (StreamOptions.onPayload + StreamOptions.headers, behind canonical-pair validator). All three emit a uniform telemetry record to .pi/orchestra.log. Defense-in-depth: send advisor-tool-2026-03-01 beta header when advisor is enabled on shared-history phases; strip advisor blocks otherwise; honor PIORX_DISABLE_ADVISOR env var.",
       "deliverable": "Three-mode runWithAdvisor helper with telemetry and defense-in-depth",
-      "files": [
-        "src/runtime/run-with-advisor.ts",
-        "tests/runtime/run-with-advisor.test.ts"
-      ],
-      "dependencies": [
-        "COMP-P2-T1"
-      ],
+      "files": ["src/runtime/run-with-advisor.ts", "tests/runtime/run-with-advisor.test.ts"],
+      "dependencies": ["COMP-P2-T1"],
       "status": "planned",
       "acceptance_criteria": [
         "All three modes produce identical telemetry record shape against a stubbed model callback",
@@ -368,12 +304,8 @@
       "scope": "short",
       "description": "extensions/conductor-extension.ts:86-130 getModelText takes a phase: keyof PhaseModelConfigs parameter and resolves the executor from runtime.config.models[phase]. ctx.model stays as a fallback for one minor version with a deprecation warning. All in-tree callers updated to pass their phase id.",
       "deliverable": "Per-phase model resolution at the extension edge; the ctx.model bottleneck is removed",
-      "files": [
-        "extensions/conductor-extension.ts"
-      ],
-      "dependencies": [
-        "COMP-P2-T1"
-      ],
+      "files": ["extensions/conductor-extension.ts"],
+      "dependencies": ["COMP-P2-T1"],
       "status": "planned",
       "acceptance_criteria": [
         "getModelText resolves the executor from runtime.config.models[phase]",
@@ -393,10 +325,7 @@
         "tests/runtime/run-with-advisor.test.ts",
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
-      "dependencies": [
-        "COMP-P2-T2",
-        "COMP-P2-T3"
-      ],
+      "dependencies": ["COMP-P2-T2", "COMP-P2-T3"],
       "status": "planned",
       "acceptance_criteria": [
         "All 497 existing tests pass with advisor.mode=none",
@@ -412,12 +341,8 @@
       "scope": "medium",
       "description": "src/synthesis/worker.ts becomes the canonical example of a Stage with modelConfig.advisor.mode='custom'. Calls runWithAdvisor with output_config.format derived from the JSON-Schema translation of analysis-report-v1 and change-spec-v1 validators (mechanical from src/artifacts/schemas.ts). Replaces the deterministic stub.",
       "deliverable": "Real LLM-driven synthesis worker producing schema-validated analysis-report or change-spec output",
-      "files": [
-        "src/synthesis/worker.ts"
-      ],
-      "dependencies": [
-        "COMP-P2-T2"
-      ],
+      "files": ["src/synthesis/worker.ts"],
+      "dependencies": ["COMP-P2-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "Worker produces analysis-report@1 or change-spec@1 artifacts that validate structurally",
@@ -433,13 +358,8 @@
       "scope": "short",
       "description": "src/synthesis/prompt.ts gains the ADVISOR_TOOL_INSTRUCTIONS block (advisor doc 4.5, verbatim from Claude Code) when advisor is enabled. The synthesis.confirm-task-type gate gets a sibling synthesis.advisor-review gate, opt-in and off by default, demonstrating gate composition by stage id.",
       "deliverable": "Advisor-aware synthesis prompt + opt-in advisor-review gate registered",
-      "files": [
-        "src/synthesis/prompt.ts",
-        "src/runtime/registry.ts"
-      ],
-      "dependencies": [
-        "COMP-P3-T1"
-      ],
+      "files": ["src/synthesis/prompt.ts", "src/runtime/registry.ts"],
+      "dependencies": ["COMP-P3-T1"],
       "status": "planned",
       "acceptance_criteria": [
         "ADVISOR_TOOL_INSTRUCTIONS block appears verbatim when advisor is enabled and is omitted otherwise",
@@ -459,10 +379,7 @@
         "tests/synthesis/worker.test.ts",
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
-      "dependencies": [
-        "COMP-P3-T1",
-        "COMP-P3-T2"
-      ],
+      "dependencies": ["COMP-P3-T1", "COMP-P3-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "Snapshot tests cover both task types (analysis-report and change-spec)",
@@ -483,9 +400,7 @@
         "src/retriever/agent-prompt.ts",
         "src/retriever/agent-types.ts"
       ],
-      "dependencies": [
-        "COMP-P2-T2"
-      ],
+      "dependencies": ["COMP-P2-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "agent.ts uses agentLoop from pi-agent-core; advisor is registered as a Tool",
@@ -501,12 +416,8 @@
       "scope": "medium",
       "description": "src/execution/worker.ts stops being a stub. Same pattern as Phase 3 synthesis: Stage with modelConfig.advisor.mode='custom' (opt-in), runWithAdvisor invocation, output_config.format derived from change-spec-v1 (the resolution that signals an executable plan).",
       "deliverable": "Real execution worker producing schema-validated change-spec artifacts",
-      "files": [
-        "src/execution/worker.ts"
-      ],
-      "dependencies": [
-        "COMP-P2-T2"
-      ],
+      "files": ["src/execution/worker.ts"],
+      "dependencies": ["COMP-P2-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "Execution worker produces change-spec@1 artifacts that validate structurally",
@@ -526,10 +437,7 @@
         "tests/retriever/agent-loop.test.ts",
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
-      "dependencies": [
-        "COMP-P4-T1",
-        "COMP-P4-T2"
-      ],
+      "dependencies": ["COMP-P4-T1", "COMP-P4-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "agent-loop tests cover the four assertions (bounded budgets, stop reasons, fallback, sanitization)",
@@ -545,13 +453,8 @@
       "scope": "short",
       "description": "Use pi.registerTool('piorx:advisor', ...) to expose interactive advisor in pi's main loop. Wire-compat with rpiv-advisor's zero-arg contract: returns {content, details: {advisorModel, effort, usage, stopReason, errorMessage}}. Verified against the rpiv-advisor npm package's actual return shape.",
       "deliverable": "piorx:advisor pi tool registered, drop-in compatible with rpiv-advisor consumers",
-      "files": [
-        "extensions/conductor-extension.ts",
-        "src/runtime/run-with-advisor.ts"
-      ],
-      "dependencies": [
-        "COMP-P2-T2"
-      ],
+      "files": ["extensions/conductor-extension.ts", "src/runtime/run-with-advisor.ts"],
+      "dependencies": ["COMP-P2-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "Tool is callable from pi's main loop with zero arguments",
@@ -572,9 +475,7 @@
         "src/runtime/paths.ts",
         "src/runtime/strategy-loader.ts"
       ],
-      "dependencies": [
-        "COMP-P5-T1"
-      ],
+      "dependencies": ["COMP-P5-T1"],
       "status": "planned",
       "acceptance_criteria": [
         "Strategies in ~/.config/piorx/strategies/ and .piorx/strategies/ are discovered at boot",
@@ -590,13 +491,8 @@
       "scope": "medium",
       "description": "@piorx/extension-api shim package exposes Stage, Pipeline (workflow), Gate, AdvisorStrategy, and piorxRegistry for third-party extensions. Re-exports from src/runtime/* with stable surface; piorx internals can refactor freely behind it. Versioned independently of piorx for ecosystem stability.",
       "deliverable": "@piorx/extension-api package published with the stable extension surface",
-      "files": [
-        "packages/extension-api/package.json",
-        "packages/extension-api/src/index.ts"
-      ],
-      "dependencies": [
-        "COMP-P5-T2"
-      ],
+      "files": ["packages/extension-api/package.json", "packages/extension-api/src/index.ts"],
+      "dependencies": ["COMP-P5-T2"],
       "status": "planned",
       "acceptance_criteria": [
         "Package re-exports Stage, Pipeline, Gate, AdvisorStrategy, piorxRegistry",
@@ -616,10 +512,7 @@
         "src/runtime/workflows/piorx-analysis-only.workflow.md",
         "tests/runtime/strategy-integration.test.ts"
       ],
-      "dependencies": [
-        "COMP-P5-T2",
-        "COMP-P5-T3"
-      ],
+      "dependencies": ["COMP-P5-T2", "COMP-P5-T3"],
       "status": "planned",
       "acceptance_criteria": [
         "piorx.analysis-only workflow validates and runs end-to-end without invoking execution",
@@ -635,12 +528,8 @@
       "scope": "short",
       "description": "src/conductor/recursive-intent.ts:48-79 currently always targets Stage 1. The recursive_promotion_target field on the workflow spec already exists from Phase 1; this task removes the hardcoded fallback and makes recursive-intent fully data-driven. The smallest knob that closes 'every workflow opinion is now in the spec.' Optional, decoupled from Phases 1-5.",
       "deliverable": "Recursive promotion target fully driven by the workflow spec, no hardcoded stage references",
-      "files": [
-        "src/conductor/recursive-intent.ts"
-      ],
-      "dependencies": [
-        "COMP-P1-T11"
-      ],
+      "files": ["src/conductor/recursive-intent.ts"],
+      "dependencies": ["COMP-P1-T11"],
       "status": "planned",
       "acceptance_criteria": [
         "recursive-intent.ts contains no hardcoded Stage 1 reference",
