@@ -132,6 +132,13 @@ export interface SourceAccessEvent {
  *   - `source_access_events`: source-access events for retrieval and any
  *     other source-reading stage.
  *
+ * COMP-P7-T3 adds optional `sub_lineage` so a stage that descends into a
+ * sub-workflow records that sub-run's lineage as a sub-tree under the
+ * parent stage's entry rather than intermixing with the flat parent
+ * sequence. Each sub-entry carries its own `workflow_spec_id` so an audit
+ * walker can reconstruct the parent/child workflow hierarchy from lineage
+ * alone.
+ *
  * All new fields are optional — appending them is purely additive.
  */
 export interface LineageEntry {
@@ -148,6 +155,13 @@ export interface LineageEntry {
   gate_decisions?: LineageGateDecision[];
   /** Source-access events surfaced from worker boundaries. */
   source_access_events?: SourceAccessEvent[];
+  /**
+   * Sub-workflow lineage tree. Populated when the stage descended into a
+   * sub-workflow (`workflow_ref` or inline `workflow:`); each entry is a
+   * full `LineageEntry` for one sub-stage run, in execution order. Absent
+   * for non-descending stages.
+   */
+  sub_lineage?: LineageEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +229,8 @@ export interface LineageExtras {
   role?: LineageRole;
   gate_decisions?: LineageGateDecision[];
   source_access_events?: SourceAccessEvent[];
+  /** Sub-workflow lineage sub-tree (COMP-P7-T3). */
+  sub_lineage?: LineageEntry[];
 }
 
 /**
@@ -241,6 +257,7 @@ export function transitionStage(
     if (extras?.source_access_events !== undefined) {
       entry.source_access_events = extras.source_access_events;
     }
+    if (extras?.sub_lineage !== undefined) entry.sub_lineage = extras.sub_lineage;
     lineage.push(entry);
   }
   return {

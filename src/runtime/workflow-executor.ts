@@ -44,6 +44,7 @@ import {
   setArtifactPointer,
   transitionStage,
   type LineageEntry,
+  type LineageExtras,
   type LineageGateDecision,
   type LineageRole,
   type SessionState,
@@ -481,10 +482,27 @@ export class WorkflowExecutor {
    * inline `workflow:` blocks are not registered in the registry, so the
    * descent path constructs a `WorkflowSpecV1` from the inline body and
    * passes it directly here.
+   *
+   * `namespace` (optional) is the parent stage id chain under which Stage
+   * adapters and gates resolve, per `docs/composability.md` "Workflows also
+   * nest" — sub-workflow stage ids namespace under the parent so they don't
+   * collide with top-level stages of the same id (`synthesis.draft`,
+   * `synthesis.critique`). The registry's `resolveStage` / `gatesFor` falls
+   * back to the bare id if no namespaced adapter is registered, so the
+   * common case of "register one adapter, reuse across positions" keeps
+   * working without ceremony.
+   *
+   * `lineageBuffer` (optional) diverts stage entries that would normally be
+   * appended to `session.lineage` into a caller-supplied array instead.
+   * Used by `runSubWorkflowStage` to capture the sub-workflow's lineage as
+   * a sub-tree under the parent stage's entry rather than intermixing with
+   * the flat parent sequence (COMP-P7-T3 acceptance criterion: an audit
+   * walker can reconstruct the parent/child workflow hierarchy from lineage
+   * alone).
    */
   private async runSpec(
     spec: WorkflowSpecV1,
-    options?: { startStageId?: string },
+    options?: { startStageId?: string; namespace?: string; lineageBuffer?: LineageEntry[] },
   ): Promise<WorkflowRunResult> {
     if (spec.stages.length === 0) {
       throw new WorkflowExecutorError(`workflow "${spec.id}" has no stages declared`);
@@ -496,6 +514,8 @@ export class WorkflowExecutor {
         `workflow "${spec.id}": startStageId "${startStageId}" does not match any declared stage`,
       );
     }
+    const namespace = options?.namespace;
+    const lineageBuffer = options?.lineageBuffer;
 
     const records: StageRunRecord[] = [];
     let currentStageId: string | undefined = startStageId;
@@ -519,15 +539,18 @@ export class WorkflowExecutor {
 
       let record: StageRunRecord;
       if (declaresSubWorkflow) {
-        record = await this.runSubWorkflowStage(spec, stageSpec, records);
+        record = await this.runSubWorkflowStage(spec, stageSpec, records, namespace, lineageBuffer);
       } else {
-        const stageImpl = this.registry.resolveStage(currentStageId);
+        const stageImpl = this.registry.resolveStage(currentStageId, namespace);
         if (!stageImpl) {
+          const namespacedDescription = namespace
+            ? ` (looked up under namespace "${namespace}")`
+            : '';
           throw new WorkflowExecutorError(
-            `workflow "${spec.id}": no Stage implementation registered for "${currentStageId}"`,
+            `workflow "${spec.id}": no Stage implementation registered for "${currentStageId}"${namespacedDescription}`,
           );
         }
-        record = await this.runStage(spec, stageSpec, stageImpl, records);
+        record = await this.runStage(spec, stageSpec, stageImpl, records, namespace, lineageBuffer);
       }
       records.push(record);
 
@@ -569,6 +592,8 @@ export class WorkflowExecutor {
     stageSpec: WorkflowStageSpec,
     stageImpl: Stage,
     prior: readonly StageRunRecord[],
+    namespace: string | undefined,
+    lineageBuffer: LineageEntry[] | undefined,
   ): Promise<StageRunRecord> {
     const sourceAccessEvents: SourceAccessEvent[] = [];
     const ctx = this.buildStageContext(stageImpl.id, sourceAccessEvents);
@@ -577,15 +602,15 @@ export class WorkflowExecutor {
     const { artifact, type } = await this.loadOutput(stageSpec, result);
     this.applySessionPointers(type, result);
 
-    const gateDecisions = await this.runGates(spec, stageSpec, ctx, prior);
+    const gateDecisions = await this.runGates(spec, stageSpec, ctx, prior, namespace);
 
-    const sessionStage = asSessionStage(stageSpec.id);
-    this.session = transitionStage(this.session, sessionStage, result.output_artifact_id, {
-      stage_id: stageSpec.id,
-      workflow_spec_id: spec.id,
-      role: this.role,
-      gate_decisions: gateDecisions.length > 0 ? gateDecisions : undefined,
-      source_access_events: sourceAccessEvents.length > 0 ? sourceAccessEvents : undefined,
+    this.commitStageRecord({
+      stageSpec,
+      workflowSpecId: spec.id,
+      outputArtifactId: result.output_artifact_id,
+      gateDecisions,
+      sourceAccessEvents,
+      lineageBuffer,
     });
 
     return {
@@ -615,10 +640,34 @@ export class WorkflowExecutor {
     parentSpec: WorkflowSpecV1,
     parentStageSpec: WorkflowStageSpec,
     prior: readonly StageRunRecord[],
+    parentNamespace: string | undefined,
+    parentLineageBuffer: LineageEntry[] | undefined,
   ): Promise<StageRunRecord> {
     const subSpec = this.resolveSubWorkflowSpec(parentSpec, parentStageSpec);
 
-    const subResult = await this.runSpec(subSpec);
+    // Sub-workflow stage ids namespace under the parent stage id chain. For
+    // a top-level parent the namespace is just the parent stage's id; for a
+    // sub-workflow nested inside a sub-workflow the namespaces concatenate
+    // (`outer.inner.parent`). Per `docs/composability.md` "Workflows also
+    // nest", this is what lets `synthesis.draft` and `synthesis.critique`
+    // co-exist with a top-level `draft` Stage adapter without collisions.
+    const subNamespace = parentNamespace
+      ? `${parentNamespace}.${parentStageSpec.id}`
+      : parentStageSpec.id;
+
+    // Capture the sub-workflow's lineage in a fresh buffer so it attaches as
+    // `sub_lineage` on the parent stage's lineage entry rather than
+    // intermixing with the flat parent sequence (COMP-P7-T3 acceptance:
+    // "Audit walkers can reconstruct the parent/child workflow hierarchy
+    // from lineage alone"). Each sub-entry carries its own `workflow_spec_id`
+    // (set by the recursive `commitStageRecord` call inside the descent),
+    // so version traceability survives the tree-flattening any consumer
+    // might do.
+    const subLineageBuffer: LineageEntry[] = [];
+    const subResult = await this.runSpec(subSpec, {
+      namespace: subNamespace,
+      lineageBuffer: subLineageBuffer,
+    });
 
     // Adopt the sub-workflow's final artifact as the parent stage's output.
     // `loadOutput` validates the produced type matches one of the parent
@@ -631,18 +680,27 @@ export class WorkflowExecutor {
     // Parent gates run after the sub-workflow returns. The context's
     // model/advisor seams resolve against the parent stage id so a phase-
     // aware host wires gate-side advisor calls to the parent phase, not the
-    // sub-workflow's last stage.
+    // sub-workflow's last stage. Gate resolution honors the OUTER namespace
+    // (the parent's namespace) — parent gates belong to the parent's
+    // composition position, not to the sub-workflow we just descended into.
     const sourceAccessEvents: SourceAccessEvent[] = [];
     const ctx = this.buildStageContext(parentStageSpec.id, sourceAccessEvents);
-    const gateDecisions = await this.runGates(parentSpec, parentStageSpec, ctx, prior);
+    const gateDecisions = await this.runGates(
+      parentSpec,
+      parentStageSpec,
+      ctx,
+      prior,
+      parentNamespace,
+    );
 
-    const sessionStage = asSessionStage(parentStageSpec.id);
-    this.session = transitionStage(this.session, sessionStage, surrogate.output_artifact_id, {
-      stage_id: parentStageSpec.id,
-      workflow_spec_id: parentSpec.id,
-      role: this.role,
-      gate_decisions: gateDecisions.length > 0 ? gateDecisions : undefined,
-      source_access_events: sourceAccessEvents.length > 0 ? sourceAccessEvents : undefined,
+    this.commitStageRecord({
+      stageSpec: parentStageSpec,
+      workflowSpecId: parentSpec.id,
+      outputArtifactId: surrogate.output_artifact_id,
+      gateDecisions,
+      sourceAccessEvents,
+      subLineage: subLineageBuffer,
+      lineageBuffer: parentLineageBuffer,
     });
 
     return {
@@ -701,9 +759,10 @@ export class WorkflowExecutor {
     stageSpec: WorkflowStageSpec,
     ctx: StageContext,
     _prior: readonly StageRunRecord[],
+    namespace: string | undefined,
   ): Promise<LineageGateDecision[]> {
     const decisions: LineageGateDecision[] = [];
-    const gates = this.registry.gatesFor(stageSpec.id);
+    const gates = this.registry.gatesFor(stageSpec.id, namespace);
     const declared = stageSpec.gates ?? [];
     for (const gate of gates) {
       // Phase 1 conservative: only run gates declared by the spec for this
@@ -840,6 +899,57 @@ export class WorkflowExecutor {
     if (slot) {
       this.session = setArtifactPointer(this.session, slot, result.output_artifact_id);
     }
+  }
+
+  /**
+   * Commit a stage's lineage record either to the session's flat lineage
+   * (top-level workflow) or to a caller-provided buffer (sub-workflow
+   * descent). When a buffer is provided, `current_stage` and `updated_at`
+   * still mutate on the session so a UI mirror of the deepest active stage
+   * stays consistent — only the lineage append is diverted into the buffer
+   * so the parent's `commitStageRecord` call can attach the buffer as
+   * `sub_lineage` on the parent entry.
+   */
+  private commitStageRecord(args: {
+    stageSpec: WorkflowStageSpec;
+    workflowSpecId: string;
+    outputArtifactId: string;
+    gateDecisions: LineageGateDecision[];
+    sourceAccessEvents: SourceAccessEvent[];
+    subLineage?: LineageEntry[];
+    lineageBuffer: LineageEntry[] | undefined;
+  }): void {
+    const sessionStage = asSessionStage(args.stageSpec.id);
+    const extras: LineageExtras = {
+      stage_id: args.stageSpec.id,
+      workflow_spec_id: args.workflowSpecId,
+      role: this.role,
+    };
+    if (args.gateDecisions.length > 0) extras.gate_decisions = args.gateDecisions;
+    if (args.sourceAccessEvents.length > 0) extras.source_access_events = args.sourceAccessEvents;
+    if (args.subLineage !== undefined) extras.sub_lineage = args.subLineage;
+
+    if (args.lineageBuffer) {
+      const now = new Date().toISOString();
+      const entry: LineageEntry = {
+        stage: sessionStage,
+        artifact_id: args.outputArtifactId,
+        timestamp: now,
+        stage_id: args.stageSpec.id,
+        workflow_spec_id: args.workflowSpecId,
+        role: this.role,
+      };
+      if (extras.gate_decisions !== undefined) entry.gate_decisions = extras.gate_decisions;
+      if (extras.source_access_events !== undefined) {
+        entry.source_access_events = extras.source_access_events;
+      }
+      if (extras.sub_lineage !== undefined) entry.sub_lineage = extras.sub_lineage;
+      args.lineageBuffer.push(entry);
+      this.session = { ...this.session, current_stage: sessionStage, updated_at: now };
+      return;
+    }
+
+    this.session = transitionStage(this.session, sessionStage, args.outputArtifactId, extras);
   }
 
   /**

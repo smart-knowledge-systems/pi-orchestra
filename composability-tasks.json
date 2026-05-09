@@ -591,7 +591,7 @@
         "tests/runtime/workflow-executor.test.ts"
       ],
       "dependencies": ["COMP-P7-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Sub-workflow stages register under namespaced ids (e.g. synthesis.draft) without colliding with parent stages",
         "LineageEntry has an optional sub_lineage: LineageEntry[] populated by the executor when descending",
@@ -608,7 +608,7 @@
       "deliverable": "Test coverage for sub-workflow descent, __exit__, and lineage sub-tree recording so the runtime behavior is protected against regression.",
       "files": ["tests/runtime/workflow-executor.test.ts"],
       "dependencies": ["COMP-P7-T1", "COMP-P7-T2", "COMP-P7-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "E2E test runs a host workflow with inline `workflow:` and asserts the sub-workflow's final artifact is returned",
         "E2E test runs a host workflow with workflow_ref and asserts identical behavior",

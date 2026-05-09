@@ -235,11 +235,37 @@ export class WorkflowRegistry {
     return spec;
   }
 
-  resolveStage(id: string): Stage | undefined {
+  /**
+   * Resolve a Stage adapter by id, optionally namespaced under a parent
+   * stage chain. Per `docs/composability.md` "Workflows also nest", sub-
+   * workflow stage ids are namespaced under the parent stage id (e.g.
+   * `synthesis.draft`, `synthesis.critique`) so they don't collide with
+   * top-level stages of the same id.
+   *
+   * Resolution prefers the namespaced id (`<namespace>.<id>`); if no adapter
+   * is registered there, it falls back to the bare id. The fallback keeps
+   * the common case of "register one adapter, reuse it across both top-level
+   * and inline-sub-workflow positions" working without ceremony, while still
+   * letting collision-prone deployments register a distinct adapter under
+   * the namespaced id.
+   *
+   * For nested sub-workflows the namespace concatenates: a sub-workflow
+   * inside a sub-workflow inside `synthesis.critique` would resolve under
+   * `synthesis.critique.draft` first, then `draft`.
+   */
+  resolveStage(id: string, namespace?: string): Stage | undefined {
+    if (namespace) {
+      const namespaced = this.stages.get(`${namespace}.${id}`);
+      if (namespaced) return namespaced;
+    }
     return this.stages.get(id);
   }
 
-  gatesFor(stageId: string): readonly GateSpec[] {
+  gatesFor(stageId: string, namespace?: string): readonly GateSpec[] {
+    if (namespace) {
+      const namespaced = this.gates.get(`${namespace}.${stageId}`);
+      if (namespaced && namespaced.length > 0) return namespaced;
+    }
     return this.gates.get(stageId) ?? [];
   }
 
