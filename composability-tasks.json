@@ -455,7 +455,7 @@
       "deliverable": "piorx:advisor pi tool registered, drop-in compatible with rpiv-advisor consumers",
       "files": ["extensions/conductor-extension.ts", "src/runtime/run-with-advisor.ts"],
       "dependencies": ["COMP-P2-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Tool is callable from pi's main loop with zero arguments",
         "Return shape matches rpiv-advisor exactly (content, details fields)",
@@ -476,7 +476,7 @@
         "src/runtime/strategy-loader.ts"
       ],
       "dependencies": ["COMP-P5-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Strategies in ~/.config/piorx/strategies/ and .piorx/strategies/ are discovered at boot",
         "Project scope wins over user scope by name (first-name-wins, matching pi)",
