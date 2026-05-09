@@ -488,6 +488,16 @@ export class WorkflowRegistry {
           );
         }
       }
+      // workflow_ref reference resolution + authority/control conformance.
+      // Inline `workflow:` blocks are validated structurally at registration
+      // time by checkSubWorkflows; workflow_ref points at another registered
+      // workflow and so its checks are referential and live here. Both
+      // forms enforce the same invariants per docs/composability.md
+      // "Workflows also nest": sub-workflow operating_mode <= parent's,
+      // mandatory_controls propagate downward additively only.
+      if (stageSpec.workflow_ref) {
+        this.checkWorkflowRefStage(spec, stageSpec.id, stageSpec.workflow_ref, violations);
+      }
       // Stage implementation present and matching.
       const impl = this.stages.get(stageSpec.id);
       if (!impl) {
@@ -550,6 +560,57 @@ export class WorkflowRegistry {
       violations.push(
         `workflow "${spec.id}": recursive_promotion_target "${spec.recursive_promotion_target}" does not match any stage id`,
       );
+    }
+  }
+
+  /**
+   * Validate a stage's `workflow_ref` against the registry.
+   *
+   * `workflow_ref` points at another registered workflow that the executor
+   * will (eventually) descend into when running the parent stage. Three
+   * checks at boot:
+   *
+   *   1. Referential — the referenced workflow id must be registered. A
+   *      typo or rename produces a loud diagnostic at boot rather than a
+   *      runtime "no Stage implementation registered" mystery.
+   *   2. Authority — the referenced workflow's `operating_mode` must be
+   *      `<= parent.operating_mode`. Authority cannot be smuggled upward
+   *      through nesting, matching the inline-`workflow:` rule enforced by
+   *      checkSubWorkflows.
+   *   3. Mandatory controls — every parent `mandatory_controls` gate id
+   *      must also appear in the referenced workflow's `mandatory_controls`.
+   *      Sub-workflows may add controls; they must not drop them.
+   *
+   * Runtime descent into the referenced workflow is not yet implemented in
+   * the executor (see docs/composability.md "deferred sub-workflow runtime
+   * work"); validating the references at boot is independent and remains
+   * useful — when descent lands, validated specs Just Work without a second
+   * pass through the surface.
+   */
+  private checkWorkflowRefStage(
+    parent: WorkflowSpecV1,
+    parentStageId: string,
+    refId: string,
+    violations: string[],
+  ): void {
+    const referenced = this.workflows.get(refId);
+    if (!referenced) {
+      violations.push(
+        `workflow "${parent.id}" stage "${parentStageId}": workflow_ref "${refId}" is not registered`,
+      );
+      return;
+    }
+    if (operatingModeRank(referenced.operating_mode) > operatingModeRank(parent.operating_mode)) {
+      violations.push(
+        `workflow "${parent.id}" stage "${parentStageId}": referenced workflow "${refId}" operating_mode "${referenced.operating_mode}" exceeds parent's "${parent.operating_mode}"`,
+      );
+    }
+    for (const control of parent.mandatory_controls) {
+      if (!referenced.mandatory_controls.includes(control)) {
+        violations.push(
+          `workflow "${parent.id}" stage "${parentStageId}": referenced workflow "${refId}" drops parent mandatory_control "${control}"`,
+        );
+      }
     }
   }
 }

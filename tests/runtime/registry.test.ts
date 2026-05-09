@@ -400,3 +400,171 @@ describe('WorkflowRegistry — sub-workflow conformance', () => {
     expect(() => registry.registerWorkflow(host)).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// workflow_ref conformance — referenced-workflow resolution + authority +
+// mandatory-control propagation. Mirrors the checks for inline
+// `workflow:` blocks (sub-workflow conformance) but operates on the
+// registered-workflow graph rather than the inline-spec tree.
+// ---------------------------------------------------------------------------
+
+function buildHostSpecWithWorkflowRef(refId: string): WorkflowSpecV1 {
+  const base = loadDefaultWorkflow();
+  return {
+    ...base,
+    id: 'piorx/workflow/ref-host@1',
+    artifact_id: `${base.artifact_id}-ref-host`,
+    stages: base.stages.map((s) =>
+      s.id === 'synthesis' ? { ...s, workflow_ref: refId } : s,
+    ),
+  };
+}
+
+function buildReferencedWorkflow(
+  overrides: Partial<WorkflowSpecV1> = {},
+): WorkflowSpecV1 {
+  // Default referenced workflow is self-consistent: its mandatory_controls
+  // are declared on `sub.dummy.gates` and matched by stub gate registrations
+  // in setupRefTestRegistry. Tests override only the fields they care about
+  // (operating_mode, mandatory_controls) and inherit the rest.
+  const baseControls = ['intent.approval', 'execution.allow_edits'];
+  const merged: WorkflowSpecV1 = {
+    artifact_type: 'piorx/workflow-spec@1',
+    artifact_id: 'wf-spec-ref-test',
+    id: 'piorx/workflow/ref-target@1',
+    name: 'workflow_ref target',
+    description: 'a synthetic referenced workflow used only in tests',
+    goals: ['exercise workflow_ref conformance'],
+    operating_mode: 'supervised-change',
+    mandatory_controls: baseControls,
+    stages: [
+      {
+        id: 'sub.dummy',
+        name: 'dummy',
+        description: 'placeholder sub stage',
+        inputs: ['piorx/evidence-bundle@1'],
+        output: 'piorx/analysis-report@1',
+        model_class: 'llm',
+        gates: baseControls,
+      },
+    ],
+    edges: [],
+    recursive_promotion_target: 'sub.dummy',
+    ...overrides,
+  };
+  // Whenever the caller overrides `mandatory_controls` we re-derive
+  // `sub.dummy.gates` so the controls remain declared on a stage. Tests
+  // that intentionally drop a control test the workflow_ref validator,
+  // not the underlying check that mandatory_controls exist at all.
+  if (overrides.mandatory_controls) {
+    merged.stages = [
+      {
+        ...merged.stages[0]!,
+        gates: overrides.mandatory_controls,
+      },
+    ];
+  }
+  return merged;
+}
+
+const stubSubStage: Stage = {
+  id: 'sub.dummy',
+  inputs: ['piorx/evidence-bundle@1'],
+  output: 'piorx/analysis-report@1',
+  async run(): Promise<{ output_artifact_id: string }> {
+    return { output_artifact_id: 'unused-in-validation' };
+  },
+};
+
+function setupRefTestRegistry(opts: {
+  host: WorkflowSpecV1;
+  referenced?: WorkflowSpecV1;
+}): WorkflowRegistry {
+  const registry = new WorkflowRegistry();
+  registry.registerWorkflow(opts.host);
+  if (opts.referenced) registry.registerWorkflow(opts.referenced);
+  registerDefaultStages(registry);
+  registry.registerStage(stubSubStage);
+  registerAllDefaultGates(registry);
+  // Register gate stubs against sub.dummy for every gate the referenced
+  // workflow declares so its own checkWorkflowReferences passes
+  // independent of the workflow_ref check we're exercising.
+  if (opts.referenced) {
+    const subStage = opts.referenced.stages.find((s) => s.id === 'sub.dummy');
+    const subGates = subStage?.gates ?? [];
+    for (const gateId of subGates) {
+      registry.registerGate('sub.dummy', makeStubGate(gateId));
+    }
+  }
+  return registry;
+}
+
+describe('WorkflowRegistry — workflow_ref conformance', () => {
+  test('workflow_ref to an unregistered workflow is rejected at validate()', () => {
+    const host = buildHostSpecWithWorkflowRef('piorx/workflow/does-not-exist@1');
+    const registry = setupRefTestRegistry({ host });
+    try {
+      registry.validate();
+      throw new Error('expected validate() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorkflowRegistryError);
+      const message = (err as WorkflowRegistryError).message;
+      expect(message).toMatch(/workflow_ref "piorx\/workflow\/does-not-exist@1" is not registered/);
+    }
+  });
+
+  test('workflow_ref to a referenced workflow with elevated operating_mode is rejected', () => {
+    const referenced = buildReferencedWorkflow({
+      operating_mode: 'constrained-autonomous',
+    });
+    const host = buildHostSpecWithWorkflowRef(referenced.id);
+    const registry = setupRefTestRegistry({ host, referenced });
+    try {
+      registry.validate();
+      throw new Error('expected validate() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorkflowRegistryError);
+      const message = (err as WorkflowRegistryError).message;
+      expect(message).toMatch(
+        /referenced workflow "piorx\/workflow\/ref-target@1" operating_mode "constrained-autonomous" exceeds parent's "supervised-change"/,
+      );
+    }
+  });
+
+  test('workflow_ref to a referenced workflow that drops parent mandatory_controls is rejected', () => {
+    const referenced = buildReferencedWorkflow({
+      mandatory_controls: ['intent.approval'], // drops execution.allow_edits
+    });
+    const host = buildHostSpecWithWorkflowRef(referenced.id);
+    const registry = setupRefTestRegistry({ host, referenced });
+    try {
+      registry.validate();
+      throw new Error('expected validate() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorkflowRegistryError);
+      const message = (err as WorkflowRegistryError).message;
+      expect(message).toMatch(
+        /referenced workflow "piorx\/workflow\/ref-target@1" drops parent mandatory_control "execution.allow_edits"/,
+      );
+    }
+  });
+
+  test('workflow_ref to a referenced workflow with same operating_mode and additive controls is accepted', () => {
+    const referenced = buildReferencedWorkflow({
+      operating_mode: 'supervised-change',
+      mandatory_controls: ['intent.approval', 'execution.allow_edits', 'sub.extra'],
+    });
+    const host = buildHostSpecWithWorkflowRef(referenced.id);
+    const registry = setupRefTestRegistry({ host, referenced });
+    expect(() => registry.validate()).not.toThrow();
+  });
+
+  test('workflow_ref to a referenced workflow with lower operating_mode is accepted', () => {
+    const referenced = buildReferencedWorkflow({
+      operating_mode: 'advisory',
+    });
+    const host = buildHostSpecWithWorkflowRef(referenced.id);
+    const registry = setupRefTestRegistry({ host, referenced });
+    expect(() => registry.validate()).not.toThrow();
+  });
+});
