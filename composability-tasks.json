@@ -401,7 +401,7 @@
         "src/retriever/agent-types.ts"
       ],
       "dependencies": ["COMP-P2-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "agent.ts uses agentLoop from pi-agent-core; advisor is registered as a Tool",
         "Existing 14 agent-loop tests pass behind the compatibility shim",
@@ -418,7 +418,7 @@
       "deliverable": "Real execution worker producing schema-validated change-spec artifacts",
       "files": ["src/execution/worker.ts"],
       "dependencies": ["COMP-P2-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Execution worker produces change-spec@1 artifacts that validate structurally",
         "Behavior is gated by execution.allow_edits (mandatory_controls preserved)",
@@ -438,7 +438,7 @@
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
       "dependencies": ["COMP-P4-T1", "COMP-P4-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "agent-loop tests cover the four assertions (bounded budgets, stop reasons, fallback, sanitization)",
         "Existing retriever tests stay green behind the shim",
