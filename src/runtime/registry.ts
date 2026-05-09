@@ -29,6 +29,7 @@
 
 import { ARTIFACT_TYPES, type ArtifactType, type WorkflowSpecV1 } from '../artifacts/types.ts';
 import { validateArtifact } from '../artifacts/schemas.ts';
+import { evidenceReviewGate } from '../conductor/evidence-overrides.ts';
 import type { GateSpec } from './gate.ts';
 import type { Stage } from './stage.ts';
 
@@ -505,6 +506,33 @@ export class WorkflowRegistry {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Default-gate registration
+// ---------------------------------------------------------------------------
+
+/**
+ * Register every default-workflow `GateSpec` against its declared stage id.
+ *
+ * Per `docs/composability.md` "Phase 1 — Scaffolding" and COMP-P1-T10, the
+ * `evidence.review` gate is the first concrete `GateOp` implementation
+ * (`src/conductor/evidence-overrides.ts`). Subsequent Phase 1 tasks land
+ * the remaining gates declared in `src/runtime/workflows/piorx-default.workflow.md`
+ * (`intent.approval`, `expansion.review`, `synthesis.confirm-task-type`,
+ * `execution.allow_edits`); each registers through this helper so the host
+ * boot sequence has a single canonical call.
+ *
+ * The helper is registry-side rather than conductor-side so the runtime
+ * ships a complete, self-validating boot path: `registerWorkflow(default)` +
+ * `registerDefaultStages(registry)` + `registerDefaultGates(registry)` +
+ * `registry.validate()` is the full Phase 1 startup. Extension authors who
+ * override individual stages or gates skip the corresponding default-
+ * registration step and call `registry.registerGate(...)` directly with
+ * their own implementation.
+ */
+export function registerDefaultGates(registry: WorkflowRegistry): void {
+  registry.registerGate('evidence', evidenceReviewGate);
 }
 
 // ---------------------------------------------------------------------------
