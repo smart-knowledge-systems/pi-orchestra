@@ -125,14 +125,17 @@ export interface StageMachineInitOptions {
 export class StageMachine {
   private state: SessionState;
   private readonly transitions: Record<Stage, readonly Stage[]>;
+  private readonly _recursivePromotionTarget: string;
 
   private constructor(
     private readonly config: PiOrchestraConfig,
     state: SessionState,
     transitions: Record<Stage, readonly Stage[]>,
+    recursivePromotionTarget: string,
   ) {
     this.state = state;
     this.transitions = transitions;
+    this._recursivePromotionTarget = recursivePromotionTarget;
   }
 
   /** Initialize (or resume) the stage machine from persisted session state. */
@@ -143,7 +146,7 @@ export class StageMachine {
     const state = await loadOrCreateSessionState(config);
     const spec = options.workflowSpec ?? loadDefaultWorkflowSpec();
     const transitions = deriveTransitionsFromWorkflowSpec(spec);
-    return new StageMachine(config, state, transitions);
+    return new StageMachine(config, state, transitions, spec.recursive_promotion_target);
   }
 
   /** Return the current stage. */
@@ -154,6 +157,16 @@ export class StageMachine {
   /** Return a readonly snapshot of the full session state. */
   get sessionState(): Readonly<SessionState> {
     return this.state;
+  }
+
+  /**
+   * The active workflow spec's `recursive_promotion_target` — the stage id
+   * a recursive restart re-enters the workflow at. Surfaced here so
+   * recursive-intent / promotion code paths read the target from the
+   * loaded spec rather than hardcoding a stage reference.
+   */
+  get recursivePromotionTarget(): string {
+    return this._recursivePromotionTarget;
   }
 
   /** Check whether a transition to the given stage is valid. */

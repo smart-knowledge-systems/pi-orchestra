@@ -530,7 +530,7 @@
       "deliverable": "Recursive promotion target fully driven by the workflow spec, no hardcoded stage references",
       "files": ["src/conductor/recursive-intent.ts"],
       "dependencies": ["COMP-P1-T11"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "recursive-intent.ts contains no hardcoded Stage 1 reference",
         "Promotion target is read from the active workflow spec at runtime",
