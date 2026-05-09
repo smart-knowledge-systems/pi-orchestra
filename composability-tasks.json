@@ -493,7 +493,7 @@
       "deliverable": "@piorx/extension-api package published with the stable extension surface",
       "files": ["packages/extension-api/package.json", "packages/extension-api/src/index.ts"],
       "dependencies": ["COMP-P5-T2"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Package re-exports Stage, Pipeline, Gate, AdvisorStrategy, piorxRegistry",
         "A sample third-party extension imports from @piorx/extension-api and successfully registers",
@@ -513,7 +513,7 @@
         "tests/runtime/strategy-integration.test.ts"
       ],
       "dependencies": ["COMP-P5-T2", "COMP-P5-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "piorx.analysis-only workflow validates and runs end-to-end without invoking execution",
         "Integration test loads a strategy file, registers it, and invokes it from synthesis",
