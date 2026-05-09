@@ -56,7 +56,7 @@ export function validateWorkerOutput(
 
   const record = output as Record<string, unknown>;
   const expectedArtifactType =
-    expectedType === 'analysis-report' ? 'analysis-report-v1' : 'change-spec-v1';
+    expectedType === 'analysis-report' ? 'piorx/analysis-report@1' : 'piorx/change-spec@1';
 
   if (record.artifact_type !== expectedArtifactType) {
     throw new SynthesisValidationError(
@@ -113,8 +113,8 @@ function buildAnalysisReport(input: SynthesisWorkerInput): AnalysisReportV1 {
   }
 
   return {
-    artifact_type: 'analysis-report-v1',
-    artifact_id: generateArtifactId('analysis-report-v1'),
+    artifact_type: 'piorx/analysis-report@1',
+    artifact_id: generateArtifactId('piorx/analysis-report@1'),
     evidence_bundle_id: bundle.artifact_id,
     summary: `Analysis of ${bundle.stats.files} file(s) with ${bundle.stats.spans} span(s) based on: ${bundle.intent_context.approved_restated_intent}`,
     findings,
@@ -140,8 +140,8 @@ function buildChangeSpec(input: SynthesisWorkerInput): ChangeSpecV1 {
   }));
 
   return {
-    artifact_type: 'change-spec-v1',
-    artifact_id: generateArtifactId('change-spec-v1'),
+    artifact_type: 'piorx/change-spec@1',
+    artifact_id: generateArtifactId('piorx/change-spec@1'),
     evidence_bundle_id: bundle.artifact_id,
     change_goal: bundle.intent_context.approved_restated_intent,
     summary: `Change specification targeting ${edits.length} edit(s) across ${bundle.stats.files} file(s)`,

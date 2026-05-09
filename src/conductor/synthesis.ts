@@ -196,7 +196,7 @@ export function renderChangeSpec(spec: ChangeSpecV1): RenderedSynthesisResult {
 export function renderSynthesisResult(
   artifact: AnalysisReportV1 | ChangeSpecV1,
 ): RenderedSynthesisResult {
-  if (artifact.artifact_type === 'analysis-report-v1') {
+  if (artifact.artifact_type === 'piorx/analysis-report@1') {
     return renderAnalysisReport(artifact);
   }
   return renderChangeSpec(artifact);
@@ -212,7 +212,9 @@ export async function loadAndRenderSynthesis(
   taskType: SynthesisTaskType,
 ): Promise<RenderedSynthesisResult | null> {
   const type =
-    taskType === 'analysis-report' ? ('analysis-report-v1' as const) : ('change-spec-v1' as const);
+    taskType === 'analysis-report'
+      ? ('piorx/analysis-report@1' as const)
+      : ('piorx/change-spec@1' as const);
   const artifact = await store.get(type, artifactId);
   if (!artifact) return null;
   return renderSynthesisResult(artifact as AnalysisReportV1 | ChangeSpecV1);

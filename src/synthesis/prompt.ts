@@ -115,7 +115,7 @@ const OUTPUT_DIRECTIVES: Record<'analysis-report' | 'change-spec', string> = {
   'analysis-report': [
     '## Output Format',
     '',
-    'Produce a JSON object with artifact_type "analysis-report-v1" containing:',
+    'Produce a JSON object with artifact_type "piorx/analysis-report@1" containing:',
     '- evidence_bundle_id: the bundle ID provided',
     '- summary: a concise summary of your analysis',
     '- findings: an array of key findings',
@@ -125,7 +125,7 @@ const OUTPUT_DIRECTIVES: Record<'analysis-report' | 'change-spec', string> = {
   'change-spec': [
     '## Output Format',
     '',
-    'Produce a JSON object with artifact_type "change-spec-v1" containing:',
+    'Produce a JSON object with artifact_type "piorx/change-spec@1" containing:',
     '- evidence_bundle_id: the bundle ID provided',
     '- change_goal: the high-level goal of the change',
     '- summary: a concise summary of the planned changes',

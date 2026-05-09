@@ -23,7 +23,7 @@ import type { ChangeSpecV1 } from '../../src/artifacts/types.ts';
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_safety_001',
     evidence_bundle_id: 'bundle_safety_001',
     change_goal: 'Add input validation',
@@ -125,7 +125,7 @@ describe('runExecutionWorker', () => {
       constraints: { allow_edits: true, run_validation: true },
     };
     const report = await runExecutionWorker(input);
-    expect(report.artifact_type).toBe('execution-report-v1');
+    expect(report.artifact_type).toBe('piorx/execution-report@1');
     expect(report.status).toBe('completed');
   });
 

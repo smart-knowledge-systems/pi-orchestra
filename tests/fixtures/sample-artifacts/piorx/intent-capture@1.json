@@ -1,5 +1,5 @@
 {
-  "artifact_type": "intent-capture-v1",
+  "artifact_type": "piorx/intent-capture@1",
   "artifact_id": "intent_001",
   "user_intent_verbatim": "I want to understand how model restore works and maybe change it. <file name=\"src/core/model-resolver.ts\">...</file>",
   "cleaned_user_intent": "I want to understand how model restore works and maybe change it.",

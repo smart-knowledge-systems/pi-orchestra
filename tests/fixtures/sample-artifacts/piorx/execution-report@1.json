@@ -1,5 +1,5 @@
 {
-  "artifact_type": "execution-report-v1",
+  "artifact_type": "piorx/execution-report@1",
   "artifact_id": "exec_001",
   "change_spec_id": "change_001",
   "status": "completed",

@@ -28,3 +28,23 @@ export function createConfig(repoRoot: string): PiOrchestraConfig {
   const sessionStatePath = resolve(piDir, 'session-state.json');
   return { repoRoot, piDir, artifactsDir, sessionStatePath };
 }
+
+// ---------------------------------------------------------------------------
+// Phase / advisor configuration — Phase 2 placeholder.
+// ---------------------------------------------------------------------------
+//
+// Stages and the workflow runtime reference these types now so Phase 2 can
+// land the executor + advisor wiring as a purely additive change. The
+// surface here is intentionally empty: Phase 2 fills `executor`, `advisor`,
+// `models`, etc. per docs/composability.md "Phase 2 — PhaseModelConfig +
+// runWithAdvisor".
+
+/** Per-phase model + advisor configuration. Phase 2 lands the real fields. */
+export interface PhaseModelConfig {
+  [key: string]: unknown;
+}
+
+/** Per-stage advisor configuration. Phase 2 lands the real fields. */
+export interface AdvisorConfig {
+  [key: string]: unknown;
+}

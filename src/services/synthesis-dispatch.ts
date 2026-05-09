@@ -53,7 +53,7 @@ export async function synthesisDispatch(
   store: ArtifactStore,
 ): Promise<SynthesisDispatchResult> {
   // Load the evidence bundle
-  const bundle = await store.get('evidence-bundle-v1', input.evidence_bundle_id);
+  const bundle = await store.get('piorx/evidence-bundle@1', input.evidence_bundle_id);
   if (!bundle) {
     return {
       status: 'error',

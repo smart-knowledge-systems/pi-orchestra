@@ -334,8 +334,8 @@ export function normalizeRetrievalOutput(input: NormalizeInput): NormalizeResult
   const followupQueries = raw.followup_queries ?? [];
 
   const artifact: RetrievalIndexV1 = {
-    artifact_type: 'retrieval-index-v1',
-    artifact_id: generateArtifactId('retrieval-index-v1'),
+    artifact_type: 'piorx/retrieval-index@1',
+    artifact_id: generateArtifactId('piorx/retrieval-index@1'),
     intent_capture_id: intentCaptureId,
     intent_restatement_id: intentRestatementId,
     intent_spec_id: intentSpecId,

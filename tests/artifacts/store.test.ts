@@ -26,8 +26,8 @@ afterEach(async () => {
 
 function makeIntentCapture(id?: string): IntentCaptureV1 {
   return {
-    artifact_type: 'intent-capture-v1',
-    artifact_id: id ?? generateArtifactId('intent-capture-v1'),
+    artifact_type: 'piorx/intent-capture@1',
+    artifact_id: id ?? generateArtifactId('piorx/intent-capture@1'),
     user_intent_verbatim: 'Add dark mode support',
     cleaned_user_intent: 'Add dark mode support',
     tagged_files: ['src/theme.ts'],
@@ -44,17 +44,17 @@ describe('ArtifactStore — put and get', () => {
     const artifact = makeIntentCapture();
     await store.put(artifact);
 
-    const loaded = await store.get('intent-capture-v1', artifact.artifact_id);
+    const loaded = await store.get('piorx/intent-capture@1', artifact.artifact_id);
     expect(loaded).toEqual(artifact);
   });
 
   it('returns null for a non-existent artifact', async () => {
-    const result = await store.get('intent-capture-v1', 'nonexistent_0_0');
+    const result = await store.get('piorx/intent-capture@1', 'nonexistent_0_0');
     expect(result).toBeNull();
   });
 
   it('rejects invalid artifacts on put', async () => {
-    const bad = { artifact_type: 'intent-capture-v1', artifact_id: 'x' } as any;
+    const bad = { artifact_type: 'piorx/intent-capture@1', artifact_id: 'x' } as any;
     await expect(store.put(bad)).rejects.toThrow(ArtifactStoreError);
   });
 
@@ -63,7 +63,7 @@ describe('ArtifactStore — put and get', () => {
     await store.put(capture);
 
     // Try to read it as a different type that shares the same subdir
-    await expect(store.get('intent-restatement-v1', capture.artifact_id)).rejects.toThrow(
+    await expect(store.get('piorx/intent-restatement@1', capture.artifact_id)).rejects.toThrow(
       /Type mismatch/,
     );
   });
@@ -77,11 +77,11 @@ describe('ArtifactStore — exists', () => {
   it('returns true for a stored artifact', async () => {
     const artifact = makeIntentCapture();
     await store.put(artifact);
-    expect(await store.exists('intent-capture-v1', artifact.artifact_id)).toBe(true);
+    expect(await store.exists('piorx/intent-capture@1', artifact.artifact_id)).toBe(true);
   });
 
   it('returns false for a missing artifact', async () => {
-    expect(await store.exists('intent-capture-v1', 'missing_0_0')).toBe(false);
+    expect(await store.exists('piorx/intent-capture@1', 'missing_0_0')).toBe(false);
   });
 });
 
@@ -96,13 +96,13 @@ describe('ArtifactStore — listByType', () => {
     await store.put(a);
     await store.put(b);
 
-    const list = await store.listByType('intent-capture-v1');
+    const list = await store.listByType('piorx/intent-capture@1');
     const ids = list.map((x) => x.artifact_id).sort();
     expect(ids).toEqual([a.artifact_id, b.artifact_id].sort());
   });
 
   it('returns empty array when no artifacts exist', async () => {
-    const list = await store.listByType('retrieval-index-v1');
+    const list = await store.listByType('piorx/retrieval-index@1');
     expect(list).toEqual([]);
   });
 
@@ -110,8 +110,8 @@ describe('ArtifactStore — listByType', () => {
     // intent-capture-v1 and intent-restatement-v1 share the "intents" subdir
     const capture = makeIntentCapture();
     const restatement: IntentRestatementV1 = {
-      artifact_type: 'intent-restatement-v1',
-      artifact_id: generateArtifactId('intent-restatement-v1'),
+      artifact_type: 'piorx/intent-restatement@1',
+      artifact_id: generateArtifactId('piorx/intent-restatement@1'),
       intent_capture_id: capture.artifact_id,
       user_intent_verbatim: 'Add dark mode support',
       restated_intent: 'Implement dark mode toggle in settings.',
@@ -122,11 +122,11 @@ describe('ArtifactStore — listByType', () => {
     await store.put(capture);
     await store.put(restatement);
 
-    const captures = await store.listByType('intent-capture-v1');
+    const captures = await store.listByType('piorx/intent-capture@1');
     expect(captures).toHaveLength(1);
     expect(captures[0]!.artifact_id).toBe(capture.artifact_id);
 
-    const restatements = await store.listByType('intent-restatement-v1');
+    const restatements = await store.listByType('piorx/intent-restatement@1');
     expect(restatements).toHaveLength(1);
     expect(restatements[0]!.artifact_id).toBe(restatement.artifact_id);
   });
@@ -140,8 +140,8 @@ describe('ArtifactStore — multiple artifact types', () => {
   it('stores and retrieves different artifact types independently', async () => {
     const capture = makeIntentCapture();
     const report: AnalysisReportV1 = {
-      artifact_type: 'analysis-report-v1',
-      artifact_id: generateArtifactId('analysis-report-v1'),
+      artifact_type: 'piorx/analysis-report@1',
+      artifact_id: generateArtifactId('piorx/analysis-report@1'),
       evidence_bundle_id: 'bundle_0_0',
       summary: 'All looks good.',
       findings: ['No issues found.'],
@@ -152,11 +152,11 @@ describe('ArtifactStore — multiple artifact types', () => {
     await store.put(capture);
     await store.put(report);
 
-    const loadedCapture = await store.get('intent-capture-v1', capture.artifact_id);
-    expect(loadedCapture?.artifact_type).toBe('intent-capture-v1');
+    const loadedCapture = await store.get('piorx/intent-capture@1', capture.artifact_id);
+    expect(loadedCapture?.artifact_type).toBe('piorx/intent-capture@1');
 
-    const loadedReport = await store.get('analysis-report-v1', report.artifact_id);
-    expect(loadedReport?.artifact_type).toBe('analysis-report-v1');
+    const loadedReport = await store.get('piorx/analysis-report@1', report.artifact_id);
+    expect(loadedReport?.artifact_type).toBe('piorx/analysis-report@1');
     expect(loadedReport?.summary).toBe('All looks good.');
   });
 });

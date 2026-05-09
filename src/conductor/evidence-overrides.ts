@@ -450,7 +450,7 @@ export function applyEvidenceOverrides(
   return {
     plan: {
       ...working,
-      artifact_id: generateArtifactId('evidence-plan-v1'),
+      artifact_id: generateArtifactId('piorx/evidence-plan@1'),
     },
     applied,
   };

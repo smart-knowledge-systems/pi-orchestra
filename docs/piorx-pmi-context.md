@@ -11,7 +11,7 @@ We are redesigning the orchestrator so that:
 - **Alternative workflows** can be composed by extension authors without forking the core.
 - An **advisor capability** (a stronger reviewer model that an executor consults at decision points within a stage) lands as the first canonical extension on the new substrate.
 
-Primary design tension: piorx is built as an extension to a deliberately minimalist host (`pi`) that explicitly rejects sprawling workflow concepts. We are adding stage / workflow / gate primitives as *extension-internal abstractions*, not host features.
+Primary design tension: piorx is built as an extension to a deliberately minimalist host (`pi`) that explicitly rejects sprawling workflow concepts. We are adding stage / workflow / gate primitives as _extension-internal abstractions_, not host features.
 
 ---
 
@@ -23,7 +23,7 @@ These are the entities we name, type, persist, and reason about. They are stable
 
 - **Stage** — a single unit of work that consumes one or more typed artifacts, optionally invokes a language model, and produces a single typed artifact as its output. Stages are independently testable; their input and output types are the contract. The work is delegated to a specialist worker (retriever, assembler, synthesizer, executor) under a stage-specific access policy. Stages do not run in parallel — the workflow is a sequence of stages with conditional edges, not a concurrent graph.
 
-- **Gate** — a structured approval / override seam at the boundary between two stages. The session pauses, presents the produced artifact to the user (or, in future, an automated reviewer), and accepts a typed override operation that may modify the artifact before the next stage proceeds. Examples in the current default workflow: an *intent approval* gate (user signs off on a canonical restatement of their request), an *evidence review* gate (user can narrow or widen the planned evidence scope via typed operations), a *synthesis confirmation* gate (user confirms the inferred task type), a *safety latch* gate before any code is modified.
+- **Gate** — a structured approval / override seam at the boundary between two stages. The session pauses, presents the produced artifact to the user (or, in future, an automated reviewer), and accepts a typed override operation that may modify the artifact before the next stage proceeds. Examples in the current default workflow: an _intent approval_ gate (user signs off on a canonical restatement of their request), an _evidence review_ gate (user can narrow or widen the planned evidence scope via typed operations), a _synthesis confirmation_ gate (user confirms the inferred task type), a _safety latch_ gate before any code is modified.
 
 - **Workflow Spec** — a declarative artifact that names a sequence of stages, their conditional successors, the gates wired between them, and the executor / advisor model bindings for each stage. The default piorx workflow is one workflow spec; alternative workflows are alternative workflow specs. The workflow spec is the canonical source of truth for what the workflow does; the implementation code is the source of truth for how each stage runs. The two are validated against each other at startup, with loud failures on drift.
 
@@ -39,15 +39,15 @@ These are the entities we name, type, persist, and reason about. They are stable
 
 ## The default workflow — six stages
 
-| # | Stage | Input artifacts | Output artifact | Gate (if any) | Worker has source-code access? |
-|---|---|---|---|---|---|
-| 1 | Intent restatement | User's verbatim text (and inline `<file>` references) | `intent-capture@1`, `intent-restatement@1` | Approval — user signs off on the canonical restatement | No (only the inline file references the user explicitly tagged) |
-| 2 | Expansion (optional) | `intent-restatement@1`, tagged files | `intent-spec@1` | Review — user approves / revises / rejects the expanded specification | No |
-| 3 | Retrieval | `intent-restatement@1`, `intent-spec@1` (if Stage 2 ran) | `retrieval-index@1` | None | **Yes**, under bounded budget (max 3 rounds × 4 actions × 12 file reads × 256 KiB observation budget) |
-| 4 | Evidence assembly | `retrieval-index@1` | `evidence-plan@1`, then `evidence-bundle@1` | Override — narrow / widen the plan via typed operations before assembly | No (assembler reads only the planned spans) |
-| 5 | Synthesis | `evidence-bundle@1`, intent context | Either `analysis-report@1` or `change-spec@1` | Confirmation — user confirms inferred task type | No |
-| 6 | Execution (only when Stage 5 produced a `change-spec@1`) | `change-spec@1` | `execution-report@1` | Safety latch — `allow_edits` flag must be explicit | **Yes**, modifies user code |
-| (recurrence) | Recursive promotion | Any final artifact | New `intent-capture@1` for a fresh workflow run | Promote prompt — user opts in | N/A |
+| #            | Stage                                                    | Input artifacts                                          | Output artifact                                 | Gate (if any)                                                           | Worker has source-code access?                                                                        |
+| ------------ | -------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1            | Intent restatement                                       | User's verbatim text (and inline `<file>` references)    | `intent-capture@1`, `intent-restatement@1`      | Approval — user signs off on the canonical restatement                  | No (only the inline file references the user explicitly tagged)                                       |
+| 2            | Expansion (optional)                                     | `intent-restatement@1`, tagged files                     | `intent-spec@1`                                 | Review — user approves / revises / rejects the expanded specification   | No                                                                                                    |
+| 3            | Retrieval                                                | `intent-restatement@1`, `intent-spec@1` (if Stage 2 ran) | `retrieval-index@1`                             | None                                                                    | **Yes**, under bounded budget (max 3 rounds × 4 actions × 12 file reads × 256 KiB observation budget) |
+| 4            | Evidence assembly                                        | `retrieval-index@1`                                      | `evidence-plan@1`, then `evidence-bundle@1`     | Override — narrow / widen the plan via typed operations before assembly | No (assembler reads only the planned spans)                                                           |
+| 5            | Synthesis                                                | `evidence-bundle@1`, intent context                      | Either `analysis-report@1` or `change-spec@1`   | Confirmation — user confirms inferred task type                         | No                                                                                                    |
+| 6            | Execution (only when Stage 5 produced a `change-spec@1`) | `change-spec@1`                                          | `execution-report@1`                            | Safety latch — `allow_edits` flag must be explicit                      | **Yes**, modifies user code                                                                           |
+| (recurrence) | Recursive promotion                                      | Any final artifact                                       | New `intent-capture@1` for a fresh workflow run | Promote prompt — user opts in                                           | N/A                                                                                                   |
 
 Two structural properties that govern the controlled environment:
 
@@ -73,7 +73,7 @@ Future extensions can therefore (a) insert a stage between two existing stages, 
 
 ## Specific questions we'd value input on
 
-1. **Gate design — exception escalation.** Each gate today accepts a discriminated-union of typed override operations and has a binary outcome: *accept* (apply the override, continue) or *reject* (roll back to the prior stage). Should there be a third path — an *escalate* path that surfaces an out-of-bounds situation to a higher authority (today: only the user; future: potentially an automated reviewer or an enterprise policy engine)? Where should that escalation be expressed in the workflow spec?
+1. **Gate design — exception escalation.** Each gate today accepts a discriminated-union of typed override operations and has a binary outcome: _accept_ (apply the override, continue) or _reject_ (roll back to the prior stage). Should there be a third path — an _escalate_ path that surfaces an out-of-bounds situation to a higher authority (today: only the user; future: potentially an automated reviewer or an enterprise policy engine)? Where should that escalation be expressed in the workflow spec?
 
 2. **Tolerances at stage boundaries.** The retrieval stage and the executor stage operate within bounded budgets (max rounds, max file reads, max observation bytes for retrieval; safety constraints for execution). When a budget is exceeded, the stage produces a structured "budget breached" outcome and the workflow continues with a reduced or absent deliverable. Is "continue with reduced deliverable" the right model, or should budget breaches always be raised as exceptions for explicit handling?
 
@@ -81,9 +81,9 @@ Future extensions can therefore (a) insert a stage between two existing stages, 
 
 4. **Delegation — should worker access policies be hoisted into the workflow spec?** Today the policies are baked into the worker boundaries (the retriever has source access; the synthesizer doesn't). Should these become explicit per-stage delegation bindings in the workflow spec, so an alternative workflow author can adjust them — or is hard-coding them a control property the spec should not surrender?
 
-5. **Failure modes — when a stage's output fails downstream validation.** If a stage produces an artifact that fails its schema validator (e.g., a synthesis worker returns a malformed `change-spec@1`), the current behavior is *raise validation error → stage fails → user is shown the error and may retry the stage or roll back*. Is there a cleaner failure pattern? Specifically: should there be a notion of "tentative output" that lives until a downstream consumer accepts it, or is "fail loud, retry explicitly" the right discipline for a controlled environment?
+5. **Failure modes — when a stage's output fails downstream validation.** If a stage produces an artifact that fails its schema validator (e.g., a synthesis worker returns a malformed `change-spec@1`), the current behavior is _raise validation error → stage fails → user is shown the error and may retry the stage or roll back_. Is there a cleaner failure pattern? Specifically: should there be a notion of "tentative output" that lives until a downstream consumer accepts it, or is "fail loud, retry explicitly" the right discipline for a controlled environment?
 
-6. **Composability without losing control.** When extensions can add stages, alter workflow specs, register new gates, and introduce new override types, the *controlled* environment becomes a *configurable* one. How do we keep the default workflow's control properties (every deliverable approved, every override audit-trailed, every advisor consultation telemetered) when extensions compose freely? Are there control properties that should be expressible *in the workflow spec itself* (e.g., "this stage's output must be approved before any successor stage may run") rather than being hard-coded in the runtime?
+6. **Composability without losing control.** When extensions can add stages, alter workflow specs, register new gates, and introduce new override types, the _controlled_ environment becomes a _configurable_ one. How do we keep the default workflow's control properties (every deliverable approved, every override audit-trailed, every advisor consultation telemetered) when extensions compose freely? Are there control properties that should be expressible _in the workflow spec itself_ (e.g., "this stage's output must be approved before any successor stage may run") rather than being hard-coded in the runtime?
 
 ---
 

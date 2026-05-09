@@ -1,5 +1,5 @@
 {
-  "artifact_type": "evidence-bundle-v1",
+  "artifact_type": "piorx/evidence-bundle@1",
   "artifact_id": "bundle_001",
   "evidence_plan_id": "plan_001",
   "intent_context": {

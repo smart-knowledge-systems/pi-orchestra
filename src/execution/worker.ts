@@ -101,8 +101,8 @@ export async function runExecutionWorker(input: ExecutionWorkerInput): Promise<E
   const validationPassed = constraints.run_validation;
 
   const report: ExecutionReportV1 = {
-    artifact_type: 'execution-report-v1',
-    artifact_id: generateArtifactId('execution-report-v1'),
+    artifact_type: 'piorx/execution-report@1',
+    artifact_id: generateArtifactId('piorx/execution-report@1'),
     change_spec_id: change_spec.artifact_id,
     status: validationPassed ? 'completed' : 'completed_with_warnings',
     modified_files: modifiedFiles,

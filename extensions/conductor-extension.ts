@@ -457,11 +457,11 @@ async function getCurrentIntentArtifacts(machine: StageMachine): Promise<{
   }
 
   const capture = await requireArtifact(
-    runtime.store.get('intent-capture-v1', captureId),
+    runtime.store.get('piorx/intent-capture@1', captureId),
     captureId,
   );
   const restatement = await requireArtifact(
-    runtime.store.get('intent-restatement-v1', restatementId),
+    runtime.store.get('piorx/intent-restatement@1', restatementId),
     restatementId,
   );
   return { capture, restatement };
@@ -752,7 +752,7 @@ async function runEvidenceStage(machine: StageMachine, ctx: ExtensionContext): P
   }
 
   const index = await requireArtifact(
-    runtime.store.get('retrieval-index-v1', retrievalIndexId),
+    runtime.store.get('piorx/retrieval-index@1', retrievalIndexId),
     retrievalIndexId,
   );
 
@@ -861,7 +861,7 @@ async function runSynthesisStage(
   machine: StageMachine,
   ctx: ExtensionContext,
 ): Promise<{
-  synthesisType: 'analysis-report-v1' | 'change-spec-v1';
+  synthesisType: 'piorx/analysis-report@1' | 'piorx/change-spec@1';
   synthesisId: string;
 }> {
   if (!ctx.hasUI) {
@@ -917,22 +917,22 @@ async function runSynthesisStage(
   if (taskType === 'change-spec') {
     await machine.transition('execution', result.synthesis_artifact_id);
     const spec = await requireArtifact(
-      runtime.store.get('change-spec-v1', result.synthesis_artifact_id),
+      runtime.store.get('piorx/change-spec@1', result.synthesis_artifact_id),
       result.synthesis_artifact_id,
     );
     ctx.ui.notify(`Synthesis complete.\n\n${summarizeChangeSpec(spec)}`, 'info');
     ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-    return { synthesisType: 'change-spec-v1', synthesisId: spec.artifact_id };
+    return { synthesisType: 'piorx/change-spec@1', synthesisId: spec.artifact_id };
   }
 
   await machine.transition('idle', result.synthesis_artifact_id);
   const report = await requireArtifact(
-    runtime.store.get('analysis-report-v1', result.synthesis_artifact_id),
+    runtime.store.get('piorx/analysis-report@1', result.synthesis_artifact_id),
     result.synthesis_artifact_id,
   );
   ctx.ui.notify(`Synthesis complete.\n\n${summarizeAnalysisReport(report)}`, 'info');
   ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-  return { synthesisType: 'analysis-report-v1', synthesisId: report.artifact_id };
+  return { synthesisType: 'piorx/analysis-report@1', synthesisId: report.artifact_id };
 }
 
 async function runExecutionStage(
@@ -997,7 +997,7 @@ async function runExecutionStage(
 async function maybeRecursiveRestart(
   machine: StageMachine,
   ctx: ExtensionContext,
-  source: { type: 'analysis-report-v1' | 'change-spec-v1'; id: string },
+  source: { type: 'piorx/analysis-report@1' | 'piorx/change-spec@1'; id: string },
 ): Promise<PromotionResult | null> {
   if (!ctx.hasUI) {
     return null;
@@ -1140,7 +1140,7 @@ async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContex
 
   const synthesis = await runSynthesisStage(machine, ctx);
 
-  if (synthesis.synthesisType === 'change-spec-v1') {
+  if (synthesis.synthesisType === 'piorx/change-spec@1') {
     await runExecutionStage(machine, ctx, synthesis.synthesisId);
   }
 
@@ -1151,7 +1151,7 @@ async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContex
 
   if (promoted) {
     const recursiveIntent = await requireArtifact(
-      runtime.store.get('recursive-intent-v1', promoted.recursive_intent_id!),
+      runtime.store.get('piorx/recursive-intent@1', promoted.recursive_intent_id!),
       promoted.recursive_intent_id!,
     );
     ctx.ui.notify('Recursive restart created. Starting next cycle...', 'info');

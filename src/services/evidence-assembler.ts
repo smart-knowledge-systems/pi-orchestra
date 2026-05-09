@@ -83,7 +83,7 @@ async function previewMode(
   input: EvidenceAssemblerInput,
   store: ArtifactStore,
 ): Promise<EvidencePreviewResult> {
-  const plan = await store.get('evidence-plan-v1', input.evidence_plan_id);
+  const plan = await store.get('piorx/evidence-plan@1', input.evidence_plan_id);
   if (!plan) {
     return {
       status: 'error',
@@ -94,7 +94,7 @@ async function previewMode(
     };
   }
 
-  const index = await store.get('retrieval-index-v1', input.retrieval_index_id);
+  const index = await store.get('piorx/retrieval-index@1', input.retrieval_index_id);
   if (!index) {
     return {
       status: 'error',
@@ -136,7 +136,7 @@ async function materializeMode(
   store: ArtifactStore,
 ): Promise<EvidenceMaterializeResult> {
   // Load plan
-  const plan = await store.get('evidence-plan-v1', input.evidence_plan_id);
+  const plan = await store.get('piorx/evidence-plan@1', input.evidence_plan_id);
   if (!plan) {
     return {
       status: 'error',
@@ -146,7 +146,7 @@ async function materializeMode(
   }
 
   // Load authoritative retrieval index
-  const index = await store.get('retrieval-index-v1', input.retrieval_index_id);
+  const index = await store.get('piorx/retrieval-index@1', input.retrieval_index_id);
   if (!index) {
     return {
       status: 'error',
@@ -166,8 +166,11 @@ async function materializeMode(
 
   try {
     // Build intent context from the retrieval index's source artifacts
-    const intentCapture = await store.get('intent-capture-v1', index.intent_capture_id);
-    const intentRestatement = await store.get('intent-restatement-v1', index.intent_restatement_id);
+    const intentCapture = await store.get('piorx/intent-capture@1', index.intent_capture_id);
+    const intentRestatement = await store.get(
+      'piorx/intent-restatement@1',
+      index.intent_restatement_id,
+    );
 
     const intent_context = {
       user_intent_verbatim: intentCapture?.user_intent_verbatim ?? '',
@@ -228,8 +231,8 @@ async function materializeMode(
     };
 
     const bundle: EvidenceBundleV1 = {
-      artifact_type: 'evidence-bundle-v1',
-      artifact_id: generateArtifactId('evidence-bundle-v1'),
+      artifact_type: 'piorx/evidence-bundle@1',
+      artifact_id: generateArtifactId('piorx/evidence-bundle@1'),
       evidence_plan_id: plan.artifact_id,
       intent_context,
       structural_context: {

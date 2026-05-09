@@ -45,7 +45,7 @@ afterEach(async () => {
 
 function makeAnalysisReport(): AnalysisReportV1 {
   return {
-    artifact_type: 'analysis-report-v1',
+    artifact_type: 'piorx/analysis-report@1',
     artifact_id: 'analysis_restart_001',
     evidence_bundle_id: 'bundle_restart_001',
     summary: 'Logging gaps in the ingest pipeline',
@@ -57,7 +57,7 @@ function makeAnalysisReport(): AnalysisReportV1 {
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_restart_001',
     evidence_bundle_id: 'bundle_restart_002',
     change_goal: 'Add structured logging',
@@ -103,7 +103,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Add structured logging as recommended',
       },
@@ -123,7 +123,7 @@ describe('session restart flow from promotion', () => {
     const verbatim = 'Instrument the batch processor with structured logging';
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: verbatim,
       },
@@ -132,7 +132,7 @@ describe('session restart flow from promotion', () => {
     );
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
@@ -150,7 +150,7 @@ describe('session restart flow from promotion', () => {
 
     await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up on analysis',
       },
@@ -172,7 +172,7 @@ describe('session restart flow from promotion', () => {
 
     await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up',
       },
@@ -195,7 +195,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'change-spec-v1',
+        source_artifact_type: 'piorx/change-spec@1',
         source_artifact_id: spec.artifact_id,
         new_user_intent_verbatim: 'Also add metrics alongside logging',
       },
@@ -207,11 +207,11 @@ describe('session restart flow from promotion', () => {
     expect(machine.currentStage).toBe('idle');
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
-    expect(intent.source_artifact_type).toBe('change-spec-v1');
+    expect(intent.source_artifact_type).toBe('piorx/change-spec@1');
     expect(intent.source_artifact_id).toBe(spec.artifact_id);
   });
 
@@ -220,7 +220,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: 'nonexistent_001',
         new_user_intent_verbatim: 'Follow up',
       },
@@ -242,7 +242,7 @@ describe('session restart flow from promotion', () => {
     // First restart
     const result1 = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'First follow-up',
       },
@@ -259,7 +259,7 @@ describe('session restart flow from promotion', () => {
 
     const result2 = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Second follow-up',
       },
@@ -301,17 +301,17 @@ describe('canonical promotion prompt', () => {
 
 describe('canPromote', () => {
   it('returns true for analysis-report-v1', () => {
-    expect(canPromote('analysis-report-v1')).toBe(true);
+    expect(canPromote('piorx/analysis-report@1')).toBe(true);
   });
 
   it('returns true for change-spec-v1', () => {
-    expect(canPromote('change-spec-v1')).toBe(true);
+    expect(canPromote('piorx/change-spec@1')).toBe(true);
   });
 
   it('returns false for other types', () => {
-    expect(canPromote('intent-capture-v1')).toBe(false);
-    expect(canPromote('evidence-bundle-v1')).toBe(false);
-    expect(canPromote('execution-report-v1')).toBe(false);
-    expect(canPromote('recursive-intent-v1')).toBe(false);
+    expect(canPromote('piorx/intent-capture@1')).toBe(false);
+    expect(canPromote('piorx/evidence-bundle@1')).toBe(false);
+    expect(canPromote('piorx/execution-report@1')).toBe(false);
+    expect(canPromote('piorx/recursive-intent@1')).toBe(false);
   });
 });

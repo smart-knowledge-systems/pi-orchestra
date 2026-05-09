@@ -14,7 +14,7 @@ import type { RetrievalIndexV1 } from '../../src/artifacts/types.ts';
 
 function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_test_123',
     intent_capture_id: 'ic_1',
     intent_restatement_id: 'ir_1',
@@ -139,7 +139,7 @@ describe('createEvidencePlan', () => {
   it('embeds retrieval index reference byte-equal to source', () => {
     const index = makeIndex();
     const plan = createEvidencePlan({ retrieval_index: index });
-    expect(plan.retrieval_index.artifact_type).toBe('retrieval-index-v1');
+    expect(plan.retrieval_index.artifact_type).toBe('piorx/retrieval-index@1');
     expect(plan.retrieval_index.artifact_id).toBe(index.artifact_id);
     expect(verifyEmbeddedIndex(plan, index)).toBe(true);
   });

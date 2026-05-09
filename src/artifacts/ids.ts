@@ -8,17 +8,18 @@
 import type { ArtifactType } from './types.ts';
 
 const PREFIX_MAP: Record<ArtifactType, string> = {
-  'intent-capture-v1': 'intent',
-  'intent-restatement-v1': 'restatement',
-  'expansion-input-v1': 'expand_in',
-  'intent-spec-v1': 'spec',
-  'retrieval-index-v1': 'retrieval',
-  'evidence-plan-v1': 'plan',
-  'evidence-bundle-v1': 'bundle',
-  'analysis-report-v1': 'analysis',
-  'change-spec-v1': 'change',
-  'execution-report-v1': 'exec',
-  'recursive-intent-v1': 'recur',
+  'piorx/intent-capture@1': 'intent',
+  'piorx/intent-restatement@1': 'restatement',
+  'piorx/expansion-input@1': 'expand_in',
+  'piorx/intent-spec@1': 'spec',
+  'piorx/retrieval-index@1': 'retrieval',
+  'piorx/evidence-plan@1': 'plan',
+  'piorx/evidence-bundle@1': 'bundle',
+  'piorx/analysis-report@1': 'analysis',
+  'piorx/change-spec@1': 'change',
+  'piorx/execution-report@1': 'exec',
+  'piorx/recursive-intent@1': 'recur',
+  'piorx/workflow-spec@1': 'workflow',
 };
 
 /** Returns the short prefix for a given artifact type. */

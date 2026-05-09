@@ -1,7 +1,7 @@
 {
-  "artifact_type": "recursive-intent-v1",
+  "artifact_type": "piorx/recursive-intent@1",
   "artifact_id": "recur_001",
-  "source_artifact_type": "analysis-report-v1",
+  "source_artifact_type": "piorx/analysis-report@1",
   "source_artifact_id": "analysis_001",
   "new_user_intent_verbatim": "Using the previous analysis, prepare a concrete change specification for the restore flow.",
   "restart_stage": 1

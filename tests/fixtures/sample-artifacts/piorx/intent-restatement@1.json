@@ -1,5 +1,5 @@
 {
-  "artifact_type": "intent-restatement-v1",
+  "artifact_type": "piorx/intent-restatement@1",
   "artifact_id": "restatement_001",
   "intent_capture_id": "intent_001",
   "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",

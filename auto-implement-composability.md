@@ -26,9 +26,9 @@ The throughline: **stop encoding workflow opinions in code; start encoding them 
 
 ## Source of truth split
 
-- **`docs/composability.md`** — design intent, primitives, migration phases, deferred items, and conflict-resolution rules. The canonical reference for *why*.
-- **This file (`auto-implement-composability.md`)** — task-level plan, phase gates, verification criteria. The reference for *what next*.
-- **`composability-tasks.json`** — atomic tasks consumed by the auto-implement script. The reference for *which tasks*.
+- **`docs/composability.md`** — design intent, primitives, migration phases, deferred items, and conflict-resolution rules. The canonical reference for _why_.
+- **This file (`auto-implement-composability.md`)** — task-level plan, phase gates, verification criteria. The reference for _what next_.
+- **`composability-tasks.json`** — atomic tasks consumed by the auto-implement script. The reference for _which tasks_.
 
 If `docs/composability.md` and this file disagree, `docs/composability.md` wins. Update this file rather than letting drift accumulate.
 
@@ -36,14 +36,14 @@ If `docs/composability.md` and this file disagree, `docs/composability.md` wins.
 
 ## Phases at a glance
 
-| Phase | Sprint | Tasks | Theme |
-|-------|--------|-------|-------|
-| 1 | Sprint 1 | 14 | Scaffolding (no behavior change). The artifact kernel, runtime types, registry, default workflow spec, executor, gate generalization, lineage extension, conformance tests. |
-| 2 | Sprint 2 | 4 | `PhaseModelConfig` + `runWithAdvisor`. Per-phase model resolution; three advisor modes; behavior preservation with `advisor.mode='none'`. |
-| 3 | Sprint 3 | 3 | First real LLM-driven Stage. Synthesis worker becomes the canonical advisor-aware Stage. |
-| 4 | Sprint 4 | 3 | Retriever onto `agentLoop`; execution worker becomes real. |
-| 5 | Sprint 5 | 4 | Skills-as-strategies + filesystem discovery. `@piorx/extension-api` shim. Reference second pipeline. |
-| 6 | Sprint 6 | 1 | (Optional, decoupled.) Promote recursive promotion target to a spec field. |
+| Phase | Sprint   | Tasks | Theme                                                                                                                                                                       |
+| ----- | -------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Sprint 1 | 14    | Scaffolding (no behavior change). The artifact kernel, runtime types, registry, default workflow spec, executor, gate generalization, lineage extension, conformance tests. |
+| 2     | Sprint 2 | 4     | `PhaseModelConfig` + `runWithAdvisor`. Per-phase model resolution; three advisor modes; behavior preservation with `advisor.mode='none'`.                                   |
+| 3     | Sprint 3 | 3     | First real LLM-driven Stage. Synthesis worker becomes the canonical advisor-aware Stage.                                                                                    |
+| 4     | Sprint 4 | 3     | Retriever onto `agentLoop`; execution worker becomes real.                                                                                                                  |
+| 5     | Sprint 5 | 4     | Skills-as-strategies + filesystem discovery. `@piorx/extension-api` shim. Reference second pipeline.                                                                        |
+| 6     | Sprint 6 | 1     | (Optional, decoupled.) Promote recursive promotion target to a spec field.                                                                                                  |
 
 Each phase is independently shippable, behavior-preserving where possible, and gated on the previous phase passing all existing tests (497 today).
 
@@ -65,6 +65,7 @@ Each phase is independently shippable, behavior-preserving where possible, and g
 **Goal:** every primitive in place; default workflow runs end-to-end through the new executor with byte-identical output.
 
 ### New files
+
 - `src/runtime/stage.ts` — `Stage<>`, `StageContext`, `StageResult`, `StageControl` types.
 - `src/runtime/gate.ts` — `GateSpec`, `GateOp`, `GateOpValidation`, `GateOutcome` (four-way).
 - `src/runtime/registry.ts` — `WorkflowRegistry` singleton-per-extension. Loads workflow specs, registers Stage implementations by id, validates referential integrity at boot, enforces extension conformance, fails loudly on drift.
@@ -76,6 +77,7 @@ Each phase is independently shippable, behavior-preserving where possible, and g
 - `tests/runtime/extension-conformance.test.ts` — boot-time rejection of malformed extensions.
 
 ### Refactor (behavior-preserving)
+
 - `src/conductor/stage-machine.ts:32–40` — transitions derived from the loaded workflow spec; in-code transition whitelist removed.
 - `src/conductor/{stage-1,expansion,retrieval,synthesis,recursive-intent}.ts` — wrapped as `Stage` adapters that register against stage ids declared in the workflow spec.
 - `src/conductor/evidence-overrides.ts` — first concrete `GateOp` implementation; re-export pattern for extension authors.
@@ -84,16 +86,20 @@ Each phase is independently shippable, behavior-preserving where possible, and g
 - `src/runtime/session-state.ts:46–67` — `lineage[]` extended to record stage id, gate decisions (with the four-way `GateOutcome`), the role that signed each decision (requestor / reviewer / execution_authority), the `workflow_spec_id` active at run time, and source-access events surfaced from worker boundaries.
 
 ### Extended (artifact kernel)
+
 - `src/artifacts/types.ts` — adds `WorkflowSpecV1`. Fields: `id`, `name`, `description`, `goals[]`, `stages[]` (each with `id`, `name`, `description`, `inputs`, `output`, `model_class`, `gates`), `edges[]` (with structured `when` predicates plus natural-language `description`), `recursive_promotion_target`, `operating_mode`, `mandatory_controls[]`, `governance` sub-block, `extends`, `stage_overrides`, `workflow_ref`/inline `workflow`.
-- `src/artifacts/schemas.ts` — adds the `WorkflowSpecV1` runtime validator (structural shape). The `WorkflowRegistry` layers a *referential* check at boot.
+- `src/artifacts/schemas.ts` — adds the `WorkflowSpecV1` runtime validator (structural shape). The `WorkflowRegistry` layers a _referential_ check at boot.
 
 ### Hierarchical-namespace migration
+
 Mechanical rename of artifact-type strings from flat ids (`intent-capture-v1`) to namespaced ids (`piorx/intent-capture@1`). Touches `types.ts`, `schemas.ts`, all fixtures under `tests/fixtures/sample-artifacts/`, and store path mappings. Costs nothing today; lets a future third-party stage register `@yourhandle/decision-tree@1` against the same registry.
 
 ### Phase 1 gate (most load-bearing)
+
 The existing E2E regression `tests/interaction/agentic-retrieval-flow.test.ts` produces an identical artifact graph before and after the refactor. Diff the recorded artifact ids — they should differ only in their generated suffixes, never in shape, type, or contents.
 
 ### Out of scope this phase
+
 Any new LLM-driven behavior, advisor wiring, filesystem discovery of third-party workflow specs (registry loads piorx-shipped specs only), public `@piorx/extension-api` package, agent-side spec-to-code compilation tooling, and the deferred governance items enumerated in `docs/composability.md`'s "Governance — deferred to roadmap" section.
 
 ---
@@ -103,16 +109,18 @@ Any new LLM-driven behavior, advisor wiring, filesystem discovery of third-party
 **Goal:** per-phase model resolution; three-mode advisor helper; behavior preservation with `advisor.mode='none'` everywhere.
 
 ### New / extended
+
 - `src/runtime/config.ts` extended with `PhaseModelConfig`, `AdvisorConfig`, the `models: { restatement, expansion, retrieval, synthesis, execution }` block. Validator refuses non-canonical executor/advisor pairs by default (advisor doc §3.2 + §4.1 — the API matrix is canonical).
 - `src/runtime/run-with-advisor.ts` — three modes:
   - `inline` — deterministic pre-call.
   - `custom` — pi-ai tool-loop (default; preserves per-side-call billing).
   - `server` — `StreamOptions.onPayload` + `StreamOptions.headers`, behind canonical-pair validator.
-  All three emit a uniform telemetry record to `.pi/orchestra.log`.
+    All three emit a uniform telemetry record to `.pi/orchestra.log`.
 - `getModelText` (`extensions/conductor-extension.ts:86–130`) takes a `phase: keyof PhaseModelConfigs` parameter; resolves executor from `runtime.config.models[phase]`. `ctx.model` stays as a fallback for one minor version.
 - Defense-in-depth: always send the `advisor-tool-2026-03-01` beta header on phases that touch shared history when advisor is enabled (Claude Code §4.2); strip advisor blocks otherwise (§4.3); honor `PIORX_DISABLE_ADVISOR` env var (§4.6). All in `run-with-advisor.ts`.
 
 ### Phase 2 gate
+
 With `advisor.mode === 'none'` for every stage, behavior matches Phase 1 exactly. With `advisor.mode === 'custom'` against a stubbed advisor model, telemetry records appear in `.pi/orchestra.log` and the executor's output is unchanged.
 
 ---
@@ -122,11 +130,13 @@ With `advisor.mode === 'none'` for every stage, behavior matches Phase 1 exactly
 **Goal:** synthesis becomes the canonical example of an advisor-aware Stage, with structured output derived from existing artifact schemas.
 
 ### Changed
+
 - `src/synthesis/worker.ts` — replaces the stub with a real implementation that calls `runWithAdvisor` with `output_config.format` set from the JSON-Schema translation of `analysis-report-v1` and `change-spec-v1` validators (mechanical from `src/artifacts/schemas.ts`).
 - `src/synthesis/prompt.ts` — adds the `ADVISOR_TOOL_INSTRUCTIONS` (advisor doc §4.5, verbatim from Claude Code) when advisor is enabled.
 - The `synthesis.confirm-task-type` Gate gets a sibling `synthesis.advisor-review` Gate — opt-in, off by default.
 
 ### Phase 3 gate
+
 Snapshot tests for both task types against a stubbed advisor; the existing E2E regression continues to pass with advisor disabled. New E2E asserts an enabled advisor produces a bundle with the expected `advisor_iterations` telemetry but byte-identical synthesis output (model is stubbed).
 
 ---
@@ -136,10 +146,12 @@ Snapshot tests for both task types against a stubbed advisor; the existing E2E r
 **Goal:** retriever migrates onto the shared `agentLoop`; execution worker stops being a stub; bounded budgets and existing test coverage preserved.
 
 ### Changed
+
 - Retriever rewrite collapses `src/retriever/agent.ts` (≈500 LOC) onto `agentLoop` from `@earendil-works/pi-agent-core` (already a transitive dep). Advisor slots in as one more `Tool`. The bounded-budget logic (`shouldStopAfterTurn`) is reused.
 - `src/execution/worker.ts` — same pattern as synthesis: `Stage` + `runWithAdvisor` + structured output (the `change-spec-v1` resolution).
 
 ### Phase 4 gate
+
 Existing retriever tests pass behind a compatibility shim; `tests/retriever/agent-loop.test.ts` covers the new shape; the existing agentic-retrieval E2E continues to pass.
 
 ---
@@ -149,12 +161,14 @@ Existing retriever tests pass behind a compatibility shim; `tests/retriever/agen
 **Goal:** primitives are exposed to extension authors. A user can drop a strategy file in `.piorx/strategies/` and have it discovered, registered, and invocable.
 
 ### Changed
+
 - `pi.registerTool('piorx:advisor', ...)` — interactive advisor in pi's main loop, wire-compat with rpiv-advisor's zero-arg contract (returns `{content, details: {advisorModel, effort, usage, stopReason, errorMessage}}`).
 - `.piorx/strategies/<name>.md` — markdown frontmatter for `AdvisorStrategy` (skill-shaped, pi-flavored). Discovered from `~/.config/piorx/strategies/` and `.piorx/strategies/` (mirroring pi's two-scope discovery for AGENTS.md and extensions).
 - `@piorx/extension-api` shim package exposes `Stage`, `Pipeline` (workflow), `Gate`, `AdvisorStrategy`, and `piorxRegistry` for third-party extensions.
 - An example second-pipeline (`piorx.analysis-only` — skips execution) ships as a reference for how to register a non-default flow.
 
 ### Phase 5 gate
+
 Integration test: a hand-authored `.piorx/strategies/foo.md` is discovered, registered, and successfully invokes the advisor from an active synthesis stage. The rpiv-advisor wire-compat is checked against its npm package's actual return shape.
 
 ---
@@ -164,9 +178,11 @@ Integration test: a hand-authored `.piorx/strategies/foo.md` is discovered, regi
 **Goal:** the smallest knob that closes "every workflow opinion is now in the spec."
 
 ### Changed
+
 - `src/conductor/recursive-intent.ts:48–79` — promotion target is fully driven by the workflow spec's `recursive_promotion_target` field; no hardcoded Stage 1 reference remains.
 
 ### Phase 6 gate
+
 Default workflow's `recursive_promotion_target=restatement` preserves current behavior; an alternative workflow with a different target is exercisable in tests.
 
 ---
@@ -201,8 +217,8 @@ See `docs/composability.md` "What this plan deliberately defers" and "Governance
 
 - **MCP support.** Eventually exposable through an adapter Stage, but not a Phase 1–5 concern.
 - **Distinct extensions per stage.** piorx stays a single pi extension.
-- **Multi-stakeholder governance.** Lineage records the *role* signing each decision (Phase 1, COMP-P1-T12), so the upgrade path is a registry-side check, not a schema migration.
+- **Multi-stakeholder governance.** Lineage records the _role_ signing each decision (Phase 1, COMP-P1-T12), so the upgrade path is a registry-side check, not a schema migration.
 - **Tamper-resistant audit.** Append-only artifacts give most of the integrity property; signing / hash chains / WORM storage is roadmap.
-- **Risk register per workflow.** Explicit *pushback*, not deferral. The runtime *enforces* risks; asking workflow authors to enumerate them is governance-as-bureaucracy.
+- **Risk register per workflow.** Explicit _pushback_, not deferral. The runtime _enforces_ risks; asking workflow authors to enumerate them is governance-as-bureaucracy.
 
 The deferral is **visible**, the upgrade path is **clear**, and nothing in Phase 1 builds in a way that blocks any of these later.

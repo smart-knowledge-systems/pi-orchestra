@@ -75,7 +75,7 @@ async function setupFiles() {
 
 function makeIndex(): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_det',
     intent_capture_id: 'ic_det',
     intent_restatement_id: 'ir_det',
@@ -204,9 +204,9 @@ function makeIndex(): RetrievalIndexV1 {
 
 function makePlan(index: RetrievalIndexV1): EvidencePlanV1 {
   return {
-    artifact_type: 'evidence-plan-v1',
+    artifact_type: 'piorx/evidence-plan@1',
     artifact_id: 'plan_det',
-    retrieval_index: { artifact_type: 'retrieval-index-v1', artifact_id: index.artifact_id },
+    retrieval_index: { artifact_type: 'piorx/retrieval-index@1', artifact_id: index.artifact_id },
     selection: {
       files: [
         {
@@ -248,7 +248,7 @@ function makePlan(index: RetrievalIndexV1): EvidencePlanV1 {
 
 async function seedAll(index: RetrievalIndexV1, plan: EvidencePlanV1) {
   const capture: IntentCaptureV1 = {
-    artifact_type: 'intent-capture-v1',
+    artifact_type: 'piorx/intent-capture@1',
     artifact_id: 'ic_det',
     user_intent_verbatim: 'test',
     cleaned_user_intent: 'test',
@@ -256,7 +256,7 @@ async function seedAll(index: RetrievalIndexV1, plan: EvidencePlanV1) {
     timestamp: '2026-04-09T00:00:00Z',
   };
   const restatement: IntentRestatementV1 = {
-    artifact_type: 'intent-restatement-v1',
+    artifact_type: 'piorx/intent-restatement@1',
     artifact_id: 'ir_det',
     intent_capture_id: 'ic_det',
     user_intent_verbatim: 'test',
@@ -298,7 +298,7 @@ describe('determinism', () => {
         store,
       )) as EvidenceMaterializeResult;
       expect(r.status).toBe('success');
-      const b = await store.get('evidence-bundle-v1', r.evidence_bundle_id!);
+      const b = await store.get('piorx/evidence-bundle@1', r.evidence_bundle_id!);
       results.push(b!);
     }
 
@@ -368,8 +368,8 @@ describe('determinism', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const b1 = await store.get('evidence-bundle-v1', r1.evidence_bundle_id!);
-    const b2 = await store.get('evidence-bundle-v1', r2.evidence_bundle_id!);
+    const b1 = await store.get('piorx/evidence-bundle@1', r1.evidence_bundle_id!);
+    const b2 = await store.get('piorx/evidence-bundle@1', r2.evidence_bundle_id!);
 
     // Both should produce the same raw evidence content (just file order may differ)
     const sortEvidence = (b: EvidenceBundleV1) =>
@@ -416,7 +416,7 @@ describe('determinism', () => {
         },
         store,
       )) as EvidenceMaterializeResult;
-      const b = await store.get('evidence-bundle-v1', r.evidence_bundle_id!);
+      const b = await store.get('piorx/evidence-bundle@1', r.evidence_bundle_id!);
       results.push(JSON.stringify(b!.raw_evidence));
     }
 

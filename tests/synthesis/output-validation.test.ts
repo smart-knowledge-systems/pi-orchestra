@@ -7,7 +7,7 @@ import { validateWorkerOutput, SynthesisValidationError } from '../../src/synthe
 
 function validAnalysisReport() {
   return {
-    artifact_type: 'analysis-report-v1',
+    artifact_type: 'piorx/analysis-report@1',
     artifact_id: 'analysis_test_001',
     evidence_bundle_id: 'bundle_001',
     summary: 'Analysis complete',
@@ -19,7 +19,7 @@ function validAnalysisReport() {
 
 function validChangeSpec() {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_test_001',
     evidence_bundle_id: 'bundle_001',
     change_goal: 'Refactor auth',
@@ -45,12 +45,12 @@ function validChangeSpec() {
 describe('validateWorkerOutput', () => {
   it('accepts valid analysis-report-v1', () => {
     const output = validateWorkerOutput(validAnalysisReport(), 'analysis-report');
-    expect(output.artifact_type).toBe('analysis-report-v1');
+    expect(output.artifact_type).toBe('piorx/analysis-report@1');
   });
 
   it('accepts valid change-spec-v1', () => {
     const output = validateWorkerOutput(validChangeSpec(), 'change-spec');
-    expect(output.artifact_type).toBe('change-spec-v1');
+    expect(output.artifact_type).toBe('piorx/change-spec@1');
   });
 
   it('rejects null output', () => {
@@ -70,7 +70,7 @@ describe('validateWorkerOutput', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (err) {
       expect(err).toBeInstanceOf(SynthesisValidationError);
-      expect((err as SynthesisValidationError).message).toContain('analysis-report-v1');
+      expect((err as SynthesisValidationError).message).toContain('piorx/analysis-report@1');
     }
   });
 
@@ -81,13 +81,13 @@ describe('validateWorkerOutput', () => {
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(SynthesisValidationError);
-      expect((err as SynthesisValidationError).message).toContain('change-spec-v1');
+      expect((err as SynthesisValidationError).message).toContain('piorx/change-spec@1');
     }
   });
 
   it('rejects analysis-report missing required fields', () => {
     const output = {
-      artifact_type: 'analysis-report-v1',
+      artifact_type: 'piorx/analysis-report@1',
       artifact_id: 'analysis_bad',
       // missing evidence_bundle_id, summary, findings, risks, recommended_next_steps
     };
@@ -105,7 +105,7 @@ describe('validateWorkerOutput', () => {
 
   it('rejects change-spec missing required fields', () => {
     const output = {
-      artifact_type: 'change-spec-v1',
+      artifact_type: 'piorx/change-spec@1',
       artifact_id: 'change_bad',
       // missing fields
     };
@@ -138,7 +138,7 @@ describe('validateWorkerOutput', () => {
 
   it('provides clear error message for malformed output', () => {
     try {
-      validateWorkerOutput({ artifact_type: 'analysis-report-v1' }, 'analysis-report');
+      validateWorkerOutput({ artifact_type: 'piorx/analysis-report@1' }, 'analysis-report');
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(SynthesisValidationError);

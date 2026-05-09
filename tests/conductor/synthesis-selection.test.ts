@@ -76,7 +76,7 @@ describe('selectTaskType', () => {
 
 function makeAnalysisReport(): AnalysisReportV1 {
   return {
-    artifact_type: 'analysis-report-v1',
+    artifact_type: 'piorx/analysis-report@1',
     artifact_id: 'analysis_test_001',
     evidence_bundle_id: 'bundle_test_001',
     summary: 'The auth module uses JWT tokens with a custom validator',
@@ -88,7 +88,7 @@ function makeAnalysisReport(): AnalysisReportV1 {
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_test_001',
     evidence_bundle_id: 'bundle_test_001',
     change_goal: 'Add refresh token support to auth module',

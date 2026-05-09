@@ -38,9 +38,9 @@ async function teardown() {
 }
 
 async function createApprovedIntent(store: ArtifactStore, machine: StageMachine) {
-  const captureId = generateArtifactId('intent-capture-v1');
+  const captureId = generateArtifactId('piorx/intent-capture@1');
   const capture: IntentCaptureV1 = {
-    artifact_type: 'intent-capture-v1',
+    artifact_type: 'piorx/intent-capture@1',
     artifact_id: captureId,
     user_intent_verbatim: 'Test intent',
     cleaned_user_intent: 'Test intent',
@@ -51,9 +51,9 @@ async function createApprovedIntent(store: ArtifactStore, machine: StageMachine)
   await machine.transition('restatement', captureId);
   await machine.setArtifact('intent_capture_id', captureId);
 
-  const restatementId = generateArtifactId('intent-restatement-v1');
+  const restatementId = generateArtifactId('piorx/intent-restatement@1');
   const restatement: IntentRestatementV1 = {
-    artifact_type: 'intent-restatement-v1',
+    artifact_type: 'piorx/intent-restatement@1',
     artifact_id: restatementId,
     intent_capture_id: captureId,
     user_intent_verbatim: 'Test intent',
@@ -92,9 +92,9 @@ describe('canStartRetrieval', () => {
   });
 
   test('blocks retrieval at restatement stage without approval', async () => {
-    const captureId = generateArtifactId('intent-capture-v1');
+    const captureId = generateArtifactId('piorx/intent-capture@1');
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: captureId,
       user_intent_verbatim: 'Test',
       cleaned_user_intent: 'Test',
@@ -131,9 +131,9 @@ describe('canStartRetrieval', () => {
 
   test('allows retrieval from expansion stage with approval', async () => {
     // Start fresh for this test — go through restatement -> expansion path
-    const captureId = generateArtifactId('intent-capture-v1');
+    const captureId = generateArtifactId('piorx/intent-capture@1');
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: captureId,
       user_intent_verbatim: 'Test with expansion',
       cleaned_user_intent: 'Test with expansion',
@@ -144,9 +144,9 @@ describe('canStartRetrieval', () => {
     await machine.transition('restatement', captureId);
     await machine.setArtifact('intent_capture_id', captureId);
 
-    const restatementId = generateArtifactId('intent-restatement-v1');
+    const restatementId = generateArtifactId('piorx/intent-restatement@1');
     const restatement: IntentRestatementV1 = {
-      artifact_type: 'intent-restatement-v1',
+      artifact_type: 'piorx/intent-restatement@1',
       artifact_id: restatementId,
       intent_capture_id: captureId,
       user_intent_verbatim: 'Test with expansion',

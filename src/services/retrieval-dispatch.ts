@@ -69,7 +69,7 @@ export async function retrievalDispatch(
   options: RetrievalDispatchOptions = {},
 ): Promise<RetrievalDispatchResult> {
   // Load the intent capture to get the query text
-  const capture = await store.get('intent-capture-v1', input.intent_capture_id);
+  const capture = await store.get('piorx/intent-capture@1', input.intent_capture_id);
   if (!capture) {
     return {
       status: 'error',
@@ -79,7 +79,7 @@ export async function retrievalDispatch(
   }
 
   // Load restatement for the restated query
-  const restatement = await store.get('intent-restatement-v1', input.intent_restatement_id);
+  const restatement = await store.get('piorx/intent-restatement@1', input.intent_restatement_id);
   if (!restatement) {
     return {
       status: 'error',
@@ -91,7 +91,7 @@ export async function retrievalDispatch(
   // Load intent spec if available, for retrieval focus hints
   let retrievalFocus: string[] | undefined;
   if (input.intent_spec_id) {
-    const spec = await store.get('intent-spec-v1', input.intent_spec_id);
+    const spec = await store.get('piorx/intent-spec@1', input.intent_spec_id);
     if (spec) {
       retrievalFocus = spec.expanded_spec.retrieval_focus;
     }

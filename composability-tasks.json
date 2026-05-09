@@ -17,7 +17,7 @@
         "src/artifacts/schemas.ts"
       ],
       "dependencies": [],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "WorkflowSpecV1 covers shape (id, stages, edges, recursive_promotion_target) and governance fields (operating_mode, mandatory_controls, governance)",
         "Structural validator catches malformed shape without requiring a registry to be loaded",
@@ -40,7 +40,7 @@
         "tests/fixtures/sample-artifacts/"
       ],
       "dependencies": [],
-      "status": "planned",
+      "status": "in_progress",
       "acceptance_criteria": [
         "Every artifact_type literal in source is namespaced (piorx/<name>@<version>)",
         "Store paths and fixture files reflect the new ids",
@@ -61,7 +61,7 @@
       "dependencies": [
         "COMP-P1-T1"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Stage interface is generic over input/output artifact-type ids",
         "StageContext exposes the seams needed by existing controllers (store, lineage, model)",

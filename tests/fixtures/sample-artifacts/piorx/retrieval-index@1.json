@@ -1,5 +1,5 @@
 {
-  "artifact_type": "retrieval-index-v1",
+  "artifact_type": "piorx/retrieval-index@1",
   "artifact_id": "retrieval_001",
   "intent_capture_id": "intent_001",
   "intent_restatement_id": "restatement_001",

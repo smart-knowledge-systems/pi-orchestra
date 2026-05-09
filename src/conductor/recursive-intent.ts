@@ -84,7 +84,7 @@ export async function promoteAndRestart(
  * Only analysis-report-v1 and change-spec-v1 are promotable.
  */
 export function canPromote(artifactType: string): boolean {
-  return artifactType === 'analysis-report-v1' || artifactType === 'change-spec-v1';
+  return artifactType === 'piorx/analysis-report@1' || artifactType === 'piorx/change-spec@1';
 }
 
 /**

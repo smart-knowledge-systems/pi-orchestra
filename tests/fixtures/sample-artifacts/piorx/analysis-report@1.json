@@ -1,5 +1,5 @@
 {
-  "artifact_type": "analysis-report-v1",
+  "artifact_type": "piorx/analysis-report@1",
   "artifact_id": "analysis_001",
   "evidence_bundle_id": "bundle_001",
   "summary": "Model restore first attempts exact restoration and then falls back when auth or availability checks fail.",

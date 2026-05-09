@@ -115,9 +115,9 @@ export class Stage1Controller {
     taggedFiles: string[] = [],
     options: IntentCaptureOptions = {},
   ): Promise<IntentCaptureV1> {
-    const id = generateArtifactId('intent-capture-v1');
+    const id = generateArtifactId('piorx/intent-capture@1');
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: id,
       user_intent_verbatim: userIntentVerbatim,
       cleaned_user_intent: options.cleanedIntent ?? userIntentVerbatim,
@@ -180,9 +180,9 @@ export class Stage1Controller {
     // Corrections are typed by the user into a prompt UI and are not expected
     // to contain inline <file> blocks, so the verbatim and cleaned forms
     // match. Existing tagged files and refs are preserved for continuity.
-    const newId = generateArtifactId('intent-capture-v1');
+    const newId = generateArtifactId('piorx/intent-capture@1');
     const newCapture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: newId,
       user_intent_verbatim: response.correction,
       cleaned_user_intent: response.correction,
@@ -221,9 +221,9 @@ export class Stage1Controller {
       throw new Error('Cannot finalize: no intent captured');
     }
 
-    const id = generateArtifactId('intent-restatement-v1');
+    const id = generateArtifactId('piorx/intent-restatement@1');
     const restatement: IntentRestatementV1 = {
-      artifact_type: 'intent-restatement-v1',
+      artifact_type: 'piorx/intent-restatement@1',
       artifact_id: id,
       intent_capture_id: this.intentCapture.artifact_id,
       user_intent_verbatim: this.intentCapture.user_intent_verbatim,
@@ -276,6 +276,6 @@ export async function isRetrievalAllowed(
   restatementId: string | null,
 ): Promise<boolean> {
   if (!restatementId) return false;
-  const artifact = await store.get('intent-restatement-v1', restatementId);
+  const artifact = await store.get('piorx/intent-restatement@1', restatementId);
   return artifact !== null && artifact.approved === true;
 }

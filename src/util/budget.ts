@@ -265,10 +265,10 @@ export function estimateRecommendedBudget(
   }));
 
   const syntheticPlan: EvidencePlanV1 = {
-    artifact_type: 'evidence-plan-v1',
+    artifact_type: 'piorx/evidence-plan@1',
     artifact_id: 'plan_recommended_preview',
     retrieval_index: {
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: index.artifact_id,
     },
     selection: {

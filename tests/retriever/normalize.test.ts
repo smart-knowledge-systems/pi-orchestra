@@ -223,11 +223,11 @@ describe('artifact_inspect', () => {
   });
 
   test('refuses raw bundle payloads (evidence-bundle-v1)', async () => {
-    const result = await artifactInspect(store, 'evidence-bundle-v1', 'any_id');
+    const result = await artifactInspect(store, 'piorx/evidence-bundle@1', 'any_id');
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error).toContain('refuses raw bundle payloads');
-    expect(result.error).toContain('evidence-bundle-v1');
+    expect(result.error).toContain('piorx/evidence-bundle@1');
   });
 
   test('returns text-safe inspection for retrieval-index-v1', async () => {
@@ -264,7 +264,7 @@ describe('artifact_inspect', () => {
 
     const result = await artifactInspect(
       store,
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       normalized.artifact.artifact_id,
     );
     expect(result.success).toBe(true);
@@ -287,7 +287,7 @@ describe('artifact_inspect', () => {
   });
 
   test('returns error for missing artifact', async () => {
-    const result = await artifactInspect(store, 'retrieval-index-v1', 'nonexistent');
+    const result = await artifactInspect(store, 'piorx/retrieval-index@1', 'nonexistent');
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error).toContain('not found');

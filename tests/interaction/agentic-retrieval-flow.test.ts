@@ -194,7 +194,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     expect(dispatchResult.retrieval_index_id).not.toBeNull();
 
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
     expect(index).not.toBeNull();
@@ -271,7 +271,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     );
     expect(dispatchResult.status).toBe('success');
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -289,7 +289,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     expect(result.status).toBe('success');
 
     const bundle = (await store.get(
-      'evidence-bundle-v1',
+      'piorx/evidence-bundle@1',
       result.evidence_bundle_id!,
     )) as EvidenceBundleV1;
 
@@ -380,7 +380,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(scoutDispatch.status).toBe('success');
     expect(scoutDispatch.message).not.toContain('agent rounds=');
     const scoutIndex = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       scoutDispatch.retrieval_index_id!,
     )) as RetrievalIndexV1;
     const scoutPlan = createRecommendedEvidencePlan(scoutIndex);
@@ -452,7 +452,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(modelCalls[0]!.systemPromptLen).toBeGreaterThan(0);
 
     const agentIndex = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       agentDispatch.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -563,7 +563,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     );
     expect(dispatchResult.status).toBe('success');
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -581,7 +581,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(result.status).toBe('success');
 
     const bundle = (await store.get(
-      'evidence-bundle-v1',
+      'piorx/evidence-bundle@1',
       result.evidence_bundle_id!,
     )) as EvidenceBundleV1;
 
