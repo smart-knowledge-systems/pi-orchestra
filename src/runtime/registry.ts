@@ -555,6 +555,46 @@ export class WorkflowRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// Process-wide singleton — Phase 5 (COMP-P5-T3 / @piorx/extension-api)
+// ---------------------------------------------------------------------------
+//
+// Per `docs/composability.md` "5. StageRegistry — discovery + composition":
+//
+//   > Other pi extensions can `import { piorxRegistry } from
+//   > '@piorx/extension-api'` and register their own — first-name-wins,
+//   > matching pi's idiom for tool/command resolution.
+//
+// The class itself is intentionally not a singleton (tests construct a fresh
+// instance per scope), but third-party extensions need a single registry
+// to register stages, gates, and strategies against. The accessor below
+// returns a lazily-instantiated process-wide registry; hosts call
+// `setPiorxRegistry(...)` to replace it (the default-pipeline runner does
+// this implicitly when it builds its boot-time registry, so extensions
+// loaded after boot register against the same instance).
+
+let processRegistry: WorkflowRegistry | null = null;
+
+/**
+ * Resolve the process-wide `WorkflowRegistry`. Lazy-instantiated so
+ * tests that never touch the singleton do not pay for it.
+ */
+export function getPiorxRegistry(): WorkflowRegistry {
+  if (!processRegistry) processRegistry = new WorkflowRegistry();
+  return processRegistry;
+}
+
+/**
+ * Replace the process-wide registry. Hosts call this when they want
+ * extensions loaded later in the boot sequence to register against a
+ * registry the host has already populated. Passing `null` resets the
+ * accessor so the next `getPiorxRegistry()` call lazy-instantiates a
+ * fresh instance — useful between tests.
+ */
+export function setPiorxRegistry(registry: WorkflowRegistry | null): void {
+  processRegistry = registry;
+}
+
+// ---------------------------------------------------------------------------
 // Default-gate registration
 // ---------------------------------------------------------------------------
 
