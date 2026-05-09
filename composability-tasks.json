@@ -235,7 +235,7 @@
         "tests/runtime/control-baseline.test.ts"
       ],
       "dependencies": ["COMP-P1-T7", "COMP-P1-T11", "COMP-P1-T12"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "workflow-executor.test.ts has >= 10 assertions covering edges, gates, conditional routing, and drift",
         "control-baseline.test.ts asserts the eight conformance properties",
@@ -255,7 +255,7 @@
         "tests/runtime/extension-conformance.test.ts"
       ],
       "dependencies": ["COMP-P1-T5", "COMP-P1-T6"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Readability test asks five canonical questions and passes against the default workflow",
         "Conformance test rejects three classes of malformed extension at boot",
