@@ -272,7 +272,7 @@
       "deliverable": "Per-phase model and advisor configuration in runtime config with validator",
       "files": ["src/runtime/config.ts"],
       "dependencies": ["COMP-P1-T11"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "models block declares an executor for every default-pipeline phase",
         "AdvisorMode covers none | inline | custom | server",
@@ -289,7 +289,7 @@
       "deliverable": "Three-mode runWithAdvisor helper with telemetry and defense-in-depth",
       "files": ["src/runtime/run-with-advisor.ts", "tests/runtime/run-with-advisor.test.ts"],
       "dependencies": ["COMP-P2-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "All three modes produce identical telemetry record shape against a stubbed model callback",
         "Beta header is added on phases that touch shared history when advisor is enabled, omitted otherwise",
@@ -306,7 +306,7 @@
       "deliverable": "Per-phase model resolution at the extension edge; the ctx.model bottleneck is removed",
       "files": ["extensions/conductor-extension.ts"],
       "dependencies": ["COMP-P2-T1"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "getModelText resolves the executor from runtime.config.models[phase]",
         "Every in-tree caller passes a phase id; no caller relies on ctx.model implicitly",
