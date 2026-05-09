@@ -101,7 +101,7 @@ const INTENT_FILE_REF_SOURCES = ['inline', 'reference-only', 'disk'] as const;
 
 function validateIntentCapture(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'intent-capture-v1', errors);
+  checkBase(obj, 'piorx/intent-capture@1', errors);
   checkString(obj, 'user_intent_verbatim', errors);
   checkString(obj, 'cleaned_user_intent', errors);
   checkStringArray(obj, 'tagged_files', errors);
@@ -136,7 +136,7 @@ function validateIntentCapture(obj: Record<string, unknown>): ValidationResult {
 
 function validateIntentRestatement(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'intent-restatement-v1', errors);
+  checkBase(obj, 'piorx/intent-restatement@1', errors);
   checkString(obj, 'intent_capture_id', errors);
   checkString(obj, 'user_intent_verbatim', errors);
   checkString(obj, 'restated_intent', errors);
@@ -148,7 +148,7 @@ function validateIntentRestatement(obj: Record<string, unknown>): ValidationResu
 
 function validateExpansionInput(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'expansion-input-v1', errors);
+  checkBase(obj, 'piorx/expansion-input@1', errors);
   checkString(obj, 'intent_capture_id', errors);
   checkString(obj, 'intent_restatement_id', errors);
   checkString(obj, 'user_intent_verbatim', errors);
@@ -170,7 +170,7 @@ function validateExpansionInput(obj: Record<string, unknown>): ValidationResult 
 
 function validateIntentSpec(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'intent-spec-v1', errors);
+  checkBase(obj, 'piorx/intent-spec@1', errors);
   checkString(obj, 'expansion_input_id', errors);
   checkString(obj, 'user_intent_verbatim', errors);
   checkString(obj, 'approved_restated_intent', errors);
@@ -305,7 +305,7 @@ function validateRecommendedEvidence(rec: Record<string, unknown>, errors: strin
 
 function validateRetrievalIndex(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'retrieval-index-v1', errors);
+  checkBase(obj, 'piorx/retrieval-index@1', errors);
   checkString(obj, 'intent_capture_id', errors);
   checkString(obj, 'intent_restatement_id', errors);
   checkNullableString(obj, 'intent_spec_id', errors);
@@ -334,12 +334,12 @@ function validateRetrievalIndex(obj: Record<string, unknown>): ValidationResult 
 
 function validateEvidencePlan(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'evidence-plan-v1', errors);
+  checkBase(obj, 'piorx/evidence-plan@1', errors);
   checkObject(obj, 'retrieval_index', errors);
   if (typeof obj.retrieval_index === 'object' && obj.retrieval_index !== null) {
     const ri = obj.retrieval_index as Record<string, unknown>;
-    if (ri.artifact_type !== 'retrieval-index-v1') {
-      errors.push('retrieval_index.artifact_type must be "retrieval-index-v1"');
+    if (ri.artifact_type !== 'piorx/retrieval-index@1') {
+      errors.push('retrieval_index.artifact_type must be "piorx/retrieval-index@1"');
     }
     checkString(ri, 'artifact_id', errors);
   }
@@ -352,7 +352,7 @@ function validateEvidencePlan(obj: Record<string, unknown>): ValidationResult {
 
 function validateEvidenceBundle(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'evidence-bundle-v1', errors);
+  checkBase(obj, 'piorx/evidence-bundle@1', errors);
   checkString(obj, 'evidence_plan_id', errors);
   checkObject(obj, 'intent_context', errors);
   checkObject(obj, 'structural_context', errors);
@@ -363,7 +363,7 @@ function validateEvidenceBundle(obj: Record<string, unknown>): ValidationResult 
 
 function validateAnalysisReport(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'analysis-report-v1', errors);
+  checkBase(obj, 'piorx/analysis-report@1', errors);
   checkString(obj, 'evidence_bundle_id', errors);
   checkString(obj, 'summary', errors);
   checkStringArray(obj, 'findings', errors);
@@ -374,7 +374,7 @@ function validateAnalysisReport(obj: Record<string, unknown>): ValidationResult 
 
 function validateChangeSpec(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'change-spec-v1', errors);
+  checkBase(obj, 'piorx/change-spec@1', errors);
   checkString(obj, 'evidence_bundle_id', errors);
   checkString(obj, 'change_goal', errors);
   checkString(obj, 'summary', errors);
@@ -386,7 +386,7 @@ function validateChangeSpec(obj: Record<string, unknown>): ValidationResult {
 
 function validateExecutionReport(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'execution-report-v1', errors);
+  checkBase(obj, 'piorx/execution-report@1', errors);
   checkString(obj, 'change_spec_id', errors);
   checkString(obj, 'status', errors);
   checkStringArray(obj, 'modified_files', errors);
@@ -402,11 +402,334 @@ function validateExecutionReport(obj: Record<string, unknown>): ValidationResult
 
 function validateRecursiveIntent(obj: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
-  checkBase(obj, 'recursive-intent-v1', errors);
+  checkBase(obj, 'piorx/recursive-intent@1', errors);
   checkString(obj, 'source_artifact_type', errors);
   checkString(obj, 'source_artifact_id', errors);
   checkString(obj, 'new_user_intent_verbatim', errors);
   checkNumber(obj, 'restart_stage', errors);
+  return errors.length ? fail(errors) : ok();
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowSpec — structural validator only.
+// ---------------------------------------------------------------------------
+//
+// Referential checks (every stage id has a matching Stage implementation,
+// every input/output is a known artifact_type, every gate id is registered,
+// every `extends` parent resolves, sub-workflow operating_mode <= parent's,
+// mandatory_controls propagate additively, no cycles, depth cap) layer on
+// top of this validator inside `WorkflowRegistry` at boot time. Anything
+// that requires a populated registry MUST stay out of this file.
+
+const WORKFLOW_OPERATING_MODES_LOCAL = [
+  'advisory',
+  'supervised-change',
+  'constrained-autonomous',
+] as const;
+
+const WORKFLOW_STAGE_FAILURE_HANDLINGS_LOCAL = ['retry', 'tentative', 'halt', 'escalate'] as const;
+
+function validateWorkflowStageControl(
+  ctrl: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (ctrl.entry_criteria !== undefined && typeof ctrl.entry_criteria !== 'string') {
+    errors.push(`${path}.entry_criteria must be a string`);
+  }
+  if (ctrl.exit_criteria !== undefined && typeof ctrl.exit_criteria !== 'string') {
+    errors.push(`${path}.exit_criteria must be a string`);
+  }
+  if (ctrl.acceptance_criteria !== undefined && typeof ctrl.acceptance_criteria !== 'string') {
+    errors.push(`${path}.acceptance_criteria must be a string`);
+  }
+  if (ctrl.failure_handling !== undefined) {
+    if (
+      typeof ctrl.failure_handling !== 'string' ||
+      !WORKFLOW_STAGE_FAILURE_HANDLINGS_LOCAL.includes(
+        ctrl.failure_handling as (typeof WORKFLOW_STAGE_FAILURE_HANDLINGS_LOCAL)[number],
+      )
+    ) {
+      errors.push(
+        `${path}.failure_handling must be one of ${WORKFLOW_STAGE_FAILURE_HANDLINGS_LOCAL.join(', ')}`,
+      );
+    }
+  }
+  if (ctrl.evidence_requirements !== undefined) {
+    if (!Array.isArray(ctrl.evidence_requirements)) {
+      errors.push(`${path}.evidence_requirements must be an array`);
+    } else {
+      for (let i = 0; i < ctrl.evidence_requirements.length; i++) {
+        if (typeof ctrl.evidence_requirements[i] !== 'string') {
+          errors.push(`${path}.evidence_requirements[${i}] must be a string`);
+        }
+      }
+    }
+  }
+}
+
+function validateWorkflowStage(
+  stage: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (typeof stage.id !== 'string') errors.push(`${path}.id must be a string`);
+  if (typeof stage.name !== 'string') errors.push(`${path}.name must be a string`);
+  if (typeof stage.description !== 'string') errors.push(`${path}.description must be a string`);
+  if (!Array.isArray(stage.inputs)) {
+    errors.push(`${path}.inputs must be an array`);
+  } else {
+    for (let i = 0; i < stage.inputs.length; i++) {
+      if (typeof stage.inputs[i] !== 'string') {
+        errors.push(`${path}.inputs[${i}] must be a string`);
+      }
+    }
+  }
+  if (typeof stage.output !== 'string') errors.push(`${path}.output must be a string`);
+  if (typeof stage.model_class !== 'string') errors.push(`${path}.model_class must be a string`);
+  if (stage.gates !== undefined) {
+    if (!Array.isArray(stage.gates)) {
+      errors.push(`${path}.gates must be an array`);
+    } else {
+      for (let i = 0; i < stage.gates.length; i++) {
+        if (typeof stage.gates[i] !== 'string') {
+          errors.push(`${path}.gates[${i}] must be a string`);
+        }
+      }
+    }
+  }
+  if (stage.control !== undefined) {
+    if (
+      typeof stage.control !== 'object' ||
+      stage.control === null ||
+      Array.isArray(stage.control)
+    ) {
+      errors.push(`${path}.control must be an object`);
+    } else {
+      validateWorkflowStageControl(
+        stage.control as Record<string, unknown>,
+        `${path}.control`,
+        errors,
+      );
+    }
+  }
+  if (stage.workflow_ref !== undefined && typeof stage.workflow_ref !== 'string') {
+    errors.push(`${path}.workflow_ref must be a string`);
+  }
+  if (stage.workflow !== undefined) {
+    if (
+      typeof stage.workflow !== 'object' ||
+      stage.workflow === null ||
+      Array.isArray(stage.workflow)
+    ) {
+      errors.push(`${path}.workflow must be an object`);
+    } else {
+      validateWorkflowSpecBody(
+        stage.workflow as Record<string, unknown>,
+        `${path}.workflow`,
+        errors,
+      );
+    }
+  }
+  if (stage.workflow_ref !== undefined && stage.workflow !== undefined) {
+    errors.push(`${path} cannot declare both workflow_ref and inline workflow`);
+  }
+}
+
+function validateWorkflowEdge(edge: Record<string, unknown>, path: string, errors: string[]): void {
+  if (typeof edge.from !== 'string') errors.push(`${path}.from must be a string`);
+  if (typeof edge.to !== 'string') errors.push(`${path}.to must be a string`);
+  if (typeof edge.description !== 'string') errors.push(`${path}.description must be a string`);
+  if (edge.when !== undefined) {
+    if (typeof edge.when !== 'object' || edge.when === null || Array.isArray(edge.when)) {
+      errors.push(`${path}.when must be an object`);
+    }
+  }
+}
+
+function validateWorkflowGovernance(
+  gov: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (gov.evidence_requirements !== undefined) {
+    if (!Array.isArray(gov.evidence_requirements)) {
+      errors.push(`${path}.evidence_requirements must be an array`);
+    } else {
+      for (let i = 0; i < gov.evidence_requirements.length; i++) {
+        if (typeof gov.evidence_requirements[i] !== 'string') {
+          errors.push(`${path}.evidence_requirements[${i}] must be a string`);
+        }
+      }
+    }
+  }
+  if (gov.version_pinning !== undefined && typeof gov.version_pinning !== 'string') {
+    errors.push(`${path}.version_pinning must be a string`);
+  }
+}
+
+function validateWorkflowStageOverrides(
+  overrides: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  for (const [stageId, override] of Object.entries(overrides)) {
+    const op = `${path}.${stageId}`;
+    if (typeof override !== 'object' || override === null || Array.isArray(override)) {
+      errors.push(`${op} must be an object`);
+      continue;
+    }
+    const o = override as Record<string, unknown>;
+    if (o.name !== undefined && typeof o.name !== 'string')
+      errors.push(`${op}.name must be a string`);
+    if (o.description !== undefined && typeof o.description !== 'string') {
+      errors.push(`${op}.description must be a string`);
+    }
+    if (o.inputs !== undefined) {
+      if (!Array.isArray(o.inputs)) {
+        errors.push(`${op}.inputs must be an array`);
+      } else {
+        for (let i = 0; i < o.inputs.length; i++) {
+          if (typeof o.inputs[i] !== 'string') errors.push(`${op}.inputs[${i}] must be a string`);
+        }
+      }
+    }
+    if (o.output !== undefined && typeof o.output !== 'string') {
+      errors.push(`${op}.output must be a string`);
+    }
+    if (o.model_class !== undefined && typeof o.model_class !== 'string') {
+      errors.push(`${op}.model_class must be a string`);
+    }
+    if (o.gates !== undefined) {
+      if (!Array.isArray(o.gates)) {
+        errors.push(`${op}.gates must be an array`);
+      } else {
+        for (let i = 0; i < o.gates.length; i++) {
+          if (typeof o.gates[i] !== 'string') errors.push(`${op}.gates[${i}] must be a string`);
+        }
+      }
+    }
+    if (o.control !== undefined) {
+      if (typeof o.control !== 'object' || o.control === null || Array.isArray(o.control)) {
+        errors.push(`${op}.control must be an object`);
+      } else {
+        validateWorkflowStageControl(o.control as Record<string, unknown>, `${op}.control`, errors);
+      }
+    }
+    if (o.workflow_ref !== undefined && typeof o.workflow_ref !== 'string') {
+      errors.push(`${op}.workflow_ref must be a string`);
+    }
+    if (o.workflow !== undefined) {
+      if (typeof o.workflow !== 'object' || o.workflow === null || Array.isArray(o.workflow)) {
+        errors.push(`${op}.workflow must be an object`);
+      } else {
+        validateWorkflowSpecBody(o.workflow as Record<string, unknown>, `${op}.workflow`, errors);
+      }
+    }
+  }
+}
+
+function validateWorkflowSpecBody(
+  body: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  const prefix = path ? `${path}.` : '';
+  if (typeof body.id !== 'string') errors.push(`${prefix}id must be a string`);
+  if (typeof body.name !== 'string') errors.push(`${prefix}name must be a string`);
+  if (typeof body.description !== 'string') errors.push(`${prefix}description must be a string`);
+  if (!Array.isArray(body.goals)) {
+    errors.push(`${prefix}goals must be an array`);
+  } else {
+    for (let i = 0; i < body.goals.length; i++) {
+      if (typeof body.goals[i] !== 'string') errors.push(`${prefix}goals[${i}] must be a string`);
+    }
+  }
+  if (
+    typeof body.operating_mode !== 'string' ||
+    !WORKFLOW_OPERATING_MODES_LOCAL.includes(
+      body.operating_mode as (typeof WORKFLOW_OPERATING_MODES_LOCAL)[number],
+    )
+  ) {
+    errors.push(
+      `${prefix}operating_mode must be one of ${WORKFLOW_OPERATING_MODES_LOCAL.join(', ')}`,
+    );
+  }
+  if (!Array.isArray(body.mandatory_controls)) {
+    errors.push(`${prefix}mandatory_controls must be an array`);
+  } else {
+    for (let i = 0; i < body.mandatory_controls.length; i++) {
+      if (typeof body.mandatory_controls[i] !== 'string') {
+        errors.push(`${prefix}mandatory_controls[${i}] must be a string`);
+      }
+    }
+  }
+  if (!Array.isArray(body.stages)) {
+    errors.push(`${prefix}stages must be an array`);
+  } else {
+    for (let i = 0; i < body.stages.length; i++) {
+      const stage = body.stages[i];
+      if (typeof stage !== 'object' || stage === null || Array.isArray(stage)) {
+        errors.push(`${prefix}stages[${i}] must be an object`);
+        continue;
+      }
+      validateWorkflowStage(stage as Record<string, unknown>, `${prefix}stages[${i}]`, errors);
+    }
+  }
+  if (!Array.isArray(body.edges)) {
+    errors.push(`${prefix}edges must be an array`);
+  } else {
+    for (let i = 0; i < body.edges.length; i++) {
+      const edge = body.edges[i];
+      if (typeof edge !== 'object' || edge === null || Array.isArray(edge)) {
+        errors.push(`${prefix}edges[${i}] must be an object`);
+        continue;
+      }
+      validateWorkflowEdge(edge as Record<string, unknown>, `${prefix}edges[${i}]`, errors);
+    }
+  }
+  if (typeof body.recursive_promotion_target !== 'string') {
+    errors.push(`${prefix}recursive_promotion_target must be a string`);
+  }
+  if (body.governance !== undefined) {
+    if (
+      typeof body.governance !== 'object' ||
+      body.governance === null ||
+      Array.isArray(body.governance)
+    ) {
+      errors.push(`${prefix}governance must be an object`);
+    } else {
+      validateWorkflowGovernance(
+        body.governance as Record<string, unknown>,
+        `${prefix}governance`,
+        errors,
+      );
+    }
+  }
+  if (body.extends !== undefined && typeof body.extends !== 'string') {
+    errors.push(`${prefix}extends must be a string`);
+  }
+  if (body.stage_overrides !== undefined) {
+    if (
+      typeof body.stage_overrides !== 'object' ||
+      body.stage_overrides === null ||
+      Array.isArray(body.stage_overrides)
+    ) {
+      errors.push(`${prefix}stage_overrides must be an object`);
+    } else {
+      validateWorkflowStageOverrides(
+        body.stage_overrides as Record<string, unknown>,
+        `${prefix}stage_overrides`,
+        errors,
+      );
+    }
+  }
+}
+
+function validateWorkflowSpec(obj: Record<string, unknown>): ValidationResult {
+  const errors: string[] = [];
+  checkBase(obj, 'piorx/workflow-spec@1', errors);
+  validateWorkflowSpecBody(obj, '', errors);
   return errors.length ? fail(errors) : ok();
 }
 
@@ -416,17 +739,18 @@ function validateRecursiveIntent(obj: Record<string, unknown>): ValidationResult
 
 export const validators: Record<ArtifactType, (obj: Record<string, unknown>) => ValidationResult> =
   {
-    'intent-capture-v1': validateIntentCapture,
-    'intent-restatement-v1': validateIntentRestatement,
-    'expansion-input-v1': validateExpansionInput,
-    'intent-spec-v1': validateIntentSpec,
-    'retrieval-index-v1': validateRetrievalIndex,
-    'evidence-plan-v1': validateEvidencePlan,
-    'evidence-bundle-v1': validateEvidenceBundle,
-    'analysis-report-v1': validateAnalysisReport,
-    'change-spec-v1': validateChangeSpec,
-    'execution-report-v1': validateExecutionReport,
-    'recursive-intent-v1': validateRecursiveIntent,
+    'piorx/intent-capture@1': validateIntentCapture,
+    'piorx/intent-restatement@1': validateIntentRestatement,
+    'piorx/expansion-input@1': validateExpansionInput,
+    'piorx/intent-spec@1': validateIntentSpec,
+    'piorx/retrieval-index@1': validateRetrievalIndex,
+    'piorx/evidence-plan@1': validateEvidencePlan,
+    'piorx/evidence-bundle@1': validateEvidenceBundle,
+    'piorx/analysis-report@1': validateAnalysisReport,
+    'piorx/change-spec@1': validateChangeSpec,
+    'piorx/execution-report@1': validateExecutionReport,
+    'piorx/recursive-intent@1': validateRecursiveIntent,
+    'piorx/workflow-spec@1': validateWorkflowSpec,
   };
 
 /**

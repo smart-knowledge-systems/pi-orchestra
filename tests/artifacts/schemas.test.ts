@@ -64,7 +64,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects intent-capture-v1 missing required fields', () => {
     const result = validateArtifact({
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: 'test',
     });
     expect(result.valid).toBe(false);
@@ -76,7 +76,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects intent-capture-v1 with bad intent_file_refs entries', () => {
     const result = validateArtifact({
-      artifact_type: 'intent-capture-v1',
+      artifact_type: 'piorx/intent-capture@1',
       artifact_id: 'test',
       user_intent_verbatim: 'x',
       cleaned_user_intent: 'x',
@@ -94,7 +94,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects intent-restatement-v1 with wrong field types', () => {
     const result = validateArtifact({
-      artifact_type: 'intent-restatement-v1',
+      artifact_type: 'piorx/intent-restatement@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       user_intent_verbatim: 'x',
@@ -110,7 +110,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects expansion-input-v1 with invalid included_files entries', () => {
     const result = validateArtifact({
-      artifact_type: 'expansion-input-v1',
+      artifact_type: 'piorx/expansion-input@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       intent_restatement_id: 'x',
@@ -124,7 +124,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects intent-spec-v1 with missing expanded_spec fields', () => {
     const result = validateArtifact({
-      artifact_type: 'intent-spec-v1',
+      artifact_type: 'piorx/intent-spec@1',
       artifact_id: 'test',
       expansion_input_id: 'x',
       user_intent_verbatim: 'x',
@@ -138,7 +138,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects retrieval-index-v1 with wrong intent_spec_id type', () => {
     const result = validateArtifact({
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       intent_restatement_id: 'x',
@@ -164,7 +164,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects retrieval-index-v1 missing strategy metadata and recommended_evidence', () => {
     const result = validateArtifact({
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       intent_restatement_id: 'x',
@@ -184,7 +184,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects retrieval-index-v1 file with invalid selection_tier and default_evidence_mode', () => {
     const result = validateArtifact({
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       intent_restatement_id: 'x',
@@ -248,7 +248,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects retrieval-index-v1 with malformed recommended_evidence spans', () => {
     const result = validateArtifact({
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: 'test',
       intent_capture_id: 'x',
       intent_restatement_id: 'x',
@@ -296,7 +296,7 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects evidence-plan-v1 with wrong retrieval_index.artifact_type', () => {
     const result = validateArtifact({
-      artifact_type: 'evidence-plan-v1',
+      artifact_type: 'piorx/evidence-plan@1',
       artifact_id: 'test',
       retrieval_index: { artifact_type: 'wrong', artifact_id: 'x' },
       selection: {},
@@ -305,12 +305,14 @@ describe('schema validation — invalid shapes', () => {
       target_task: {},
     });
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('retrieval_index.artifact_type must be "retrieval-index-v1"');
+    expect(result.errors).toContain(
+      'retrieval_index.artifact_type must be "piorx/retrieval-index@1"',
+    );
   });
 
   it('rejects execution-report-v1 with invalid validation block', () => {
     const result = validateArtifact({
-      artifact_type: 'execution-report-v1',
+      artifact_type: 'piorx/execution-report@1',
       artifact_id: 'test',
       change_spec_id: 'x',
       status: 'completed',
@@ -324,14 +326,202 @@ describe('schema validation — invalid shapes', () => {
 
   it('rejects recursive-intent-v1 with non-number restart_stage', () => {
     const result = validateArtifact({
-      artifact_type: 'recursive-intent-v1',
+      artifact_type: 'piorx/recursive-intent@1',
       artifact_id: 'test',
-      source_artifact_type: 'analysis-report-v1',
+      source_artifact_type: 'piorx/analysis-report@1',
       source_artifact_id: 'x',
       new_user_intent_verbatim: 'x',
       restart_stage: 'one',
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain('restart_stage must be a number');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WorkflowSpecV1 — structural validator
+// ---------------------------------------------------------------------------
+
+describe('schema validation — workflow-spec', () => {
+  function makeWorkflow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      artifact_type: 'piorx/workflow-spec@1',
+      artifact_id: 'workflow_test',
+      id: 'piorx/workflow/test@1',
+      name: 'Test workflow',
+      description: 'A workflow used in validator tests.',
+      goals: ['Goal A'],
+      operating_mode: 'supervised-change',
+      mandatory_controls: ['intent.approval'],
+      stages: [
+        {
+          id: 'restatement',
+          name: 'Restatement',
+          description: 'Capture intent and produce a restatement.',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'deterministic',
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'restatement',
+      ...overrides,
+    };
+  }
+
+  it('accepts a minimal well-formed workflow spec', () => {
+    const result = validateArtifact(makeWorkflow());
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('rejects an unknown operating_mode', () => {
+    const result = validateArtifact(makeWorkflow({ operating_mode: 'free-for-all' }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('operating_mode'))).toBe(true);
+  });
+
+  it('rejects a non-string recursive_promotion_target', () => {
+    const result = validateArtifact(makeWorkflow({ recursive_promotion_target: 42 }));
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('recursive_promotion_target must be a string');
+  });
+
+  it('rejects stages with non-string inputs entries', () => {
+    const bad = makeWorkflow({
+      stages: [
+        {
+          id: 'restatement',
+          name: 'Restatement',
+          description: 'x',
+          inputs: ['piorx/intent-capture@1', 123],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'deterministic',
+        },
+      ],
+    });
+    const result = validateArtifact(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('stages[0].inputs[1]'))).toBe(true);
+  });
+
+  it('rejects edges with non-object when predicate', () => {
+    const bad = makeWorkflow({
+      edges: [{ from: 'a', to: 'b', description: 'x', when: 'not-an-object' }],
+    });
+    const result = validateArtifact(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('edges[0].when'))).toBe(true);
+  });
+
+  it('rejects unknown failure_handling on stage control', () => {
+    const bad = makeWorkflow({
+      stages: [
+        {
+          id: 'restatement',
+          name: 'Restatement',
+          description: 'x',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'deterministic',
+          control: { failure_handling: 'panic' },
+        },
+      ],
+    });
+    const result = validateArtifact(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('failure_handling'))).toBe(true);
+  });
+
+  it('accepts representable extends + stage_overrides without semantic enforcement', () => {
+    const result = validateArtifact(
+      makeWorkflow({
+        extends: 'piorx/workflow/default@1',
+        stage_overrides: {
+          synthesis: { model_class: 'llm-with-advisor', gates: ['synthesis.advisor-review'] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts representable workflow_ref on a stage without semantic enforcement', () => {
+    const result = validateArtifact(
+      makeWorkflow({
+        stages: [
+          {
+            id: 'composite',
+            name: 'Composite stage',
+            description: 'Delegates to a sub-workflow.',
+            inputs: ['piorx/intent-capture@1'],
+            output: 'piorx/intent-restatement@1',
+            model_class: 'composite',
+            workflow_ref: 'piorx/workflow/restatement-only@1',
+          },
+        ],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects stages declaring both workflow_ref and inline workflow', () => {
+    const bad = makeWorkflow({
+      stages: [
+        {
+          id: 'composite',
+          name: 'Composite',
+          description: 'x',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'composite',
+          workflow_ref: 'piorx/workflow/foo@1',
+          workflow: makeWorkflow(),
+        },
+      ],
+    });
+    const result = validateArtifact(bad);
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((e) => e.includes('cannot declare both workflow_ref and inline workflow')),
+    ).toBe(true);
+  });
+
+  it('accepts a representable inline sub-workflow', () => {
+    const inline = {
+      id: 'piorx/workflow/sub@1',
+      name: 'Sub-workflow',
+      description: 'Nested.',
+      goals: [],
+      operating_mode: 'advisory',
+      mandatory_controls: [],
+      stages: [
+        {
+          id: 'restatement',
+          name: 'Restatement',
+          description: 'x',
+          inputs: ['piorx/intent-capture@1'],
+          output: 'piorx/intent-restatement@1',
+          model_class: 'deterministic',
+        },
+      ],
+      edges: [],
+      recursive_promotion_target: 'restatement',
+    };
+    const result = validateArtifact(
+      makeWorkflow({
+        stages: [
+          {
+            id: 'composite',
+            name: 'Composite',
+            description: 'x',
+            inputs: ['piorx/intent-capture@1'],
+            output: 'piorx/intent-restatement@1',
+            model_class: 'composite',
+            workflow: inline,
+          },
+        ],
+      }),
+    );
+    expect(result.valid).toBe(true);
   });
 });

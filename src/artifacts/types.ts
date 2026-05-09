@@ -10,17 +10,18 @@
 // ---------------------------------------------------------------------------
 
 export const ARTIFACT_TYPES = [
-  'intent-capture-v1',
-  'intent-restatement-v1',
-  'expansion-input-v1',
-  'intent-spec-v1',
-  'retrieval-index-v1',
-  'evidence-plan-v1',
-  'evidence-bundle-v1',
-  'analysis-report-v1',
-  'change-spec-v1',
-  'execution-report-v1',
-  'recursive-intent-v1',
+  'piorx/intent-capture@1',
+  'piorx/intent-restatement@1',
+  'piorx/expansion-input@1',
+  'piorx/intent-spec@1',
+  'piorx/retrieval-index@1',
+  'piorx/evidence-plan@1',
+  'piorx/evidence-bundle@1',
+  'piorx/analysis-report@1',
+  'piorx/change-spec@1',
+  'piorx/execution-report@1',
+  'piorx/recursive-intent@1',
+  'piorx/workflow-spec@1',
 ] as const;
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
@@ -46,7 +47,7 @@ export interface IntentFileRef {
 }
 
 export interface IntentCaptureV1 extends ArtifactBase {
-  artifact_type: 'intent-capture-v1';
+  artifact_type: 'piorx/intent-capture@1';
   user_intent_verbatim: string;
   cleaned_user_intent: string;
   tagged_files: string[];
@@ -59,7 +60,7 @@ export interface IntentCaptureV1 extends ArtifactBase {
 // ---------------------------------------------------------------------------
 
 export interface IntentRestatementV1 extends ArtifactBase {
-  artifact_type: 'intent-restatement-v1';
+  artifact_type: 'piorx/intent-restatement@1';
   intent_capture_id: string;
   user_intent_verbatim: string;
   restated_intent: string;
@@ -78,7 +79,7 @@ export interface ExpansionIncludedFile {
 }
 
 export interface ExpansionInputV1 extends ArtifactBase {
-  artifact_type: 'expansion-input-v1';
+  artifact_type: 'piorx/expansion-input@1';
   intent_capture_id: string;
   intent_restatement_id: string;
   user_intent_verbatim: string;
@@ -99,7 +100,7 @@ export interface ExpandedSpec {
 }
 
 export interface IntentSpecV1 extends ArtifactBase {
-  artifact_type: 'intent-spec-v1';
+  artifact_type: 'piorx/intent-spec@1';
   expansion_input_id: string;
   user_intent_verbatim: string;
   approved_restated_intent: string;
@@ -176,7 +177,7 @@ export interface RetrievalRecommendedEvidence {
 }
 
 export interface RetrievalIndexV1 extends ArtifactBase {
-  artifact_type: 'retrieval-index-v1';
+  artifact_type: 'piorx/retrieval-index@1';
   intent_capture_id: string;
   intent_restatement_id: string;
   intent_spec_id: string | null;
@@ -235,9 +236,9 @@ export interface TargetTask {
 }
 
 export interface EvidencePlanV1 extends ArtifactBase {
-  artifact_type: 'evidence-plan-v1';
+  artifact_type: 'piorx/evidence-plan@1';
   retrieval_index: {
-    artifact_type: 'retrieval-index-v1';
+    artifact_type: 'piorx/retrieval-index@1';
     artifact_id: string;
   };
   selection: EvidencePlanSelection;
@@ -282,7 +283,7 @@ export interface BundleStats {
 }
 
 export interface EvidenceBundleV1 extends ArtifactBase {
-  artifact_type: 'evidence-bundle-v1';
+  artifact_type: 'piorx/evidence-bundle@1';
   evidence_plan_id: string;
   intent_context: {
     user_intent_verbatim: string;
@@ -302,7 +303,7 @@ export interface EvidenceBundleV1 extends ArtifactBase {
 // ---------------------------------------------------------------------------
 
 export interface AnalysisReportV1 extends ArtifactBase {
-  artifact_type: 'analysis-report-v1';
+  artifact_type: 'piorx/analysis-report@1';
   evidence_bundle_id: string;
   summary: string;
   findings: string[];
@@ -328,7 +329,7 @@ export interface ChangeSpecEdit {
 }
 
 export interface ChangeSpecV1 extends ArtifactBase {
-  artifact_type: 'change-spec-v1';
+  artifact_type: 'piorx/change-spec@1';
   evidence_bundle_id: string;
   change_goal: string;
   summary: string;
@@ -342,7 +343,7 @@ export interface ChangeSpecV1 extends ArtifactBase {
 // ---------------------------------------------------------------------------
 
 export interface ExecutionReportV1 extends ArtifactBase {
-  artifact_type: 'execution-report-v1';
+  artifact_type: 'piorx/execution-report@1';
   change_spec_id: string;
   status: string;
   modified_files: string[];
@@ -358,11 +359,104 @@ export interface ExecutionReportV1 extends ArtifactBase {
 // ---------------------------------------------------------------------------
 
 export interface RecursiveIntentV1 extends ArtifactBase {
-  artifact_type: 'recursive-intent-v1';
+  artifact_type: 'piorx/recursive-intent@1';
   source_artifact_type: string;
   source_artifact_id: string;
   new_user_intent_verbatim: string;
   restart_stage: number;
+}
+
+// ---------------------------------------------------------------------------
+// 12. workflow-spec-v1
+// ---------------------------------------------------------------------------
+
+export type WorkflowOperatingMode = 'advisory' | 'supervised-change' | 'constrained-autonomous';
+
+export const WORKFLOW_OPERATING_MODES: readonly WorkflowOperatingMode[] = [
+  'advisory',
+  'supervised-change',
+  'constrained-autonomous',
+] as const;
+
+export type WorkflowStageFailureHandling = 'retry' | 'tentative' | 'halt' | 'escalate';
+
+export const WORKFLOW_STAGE_FAILURE_HANDLINGS: readonly WorkflowStageFailureHandling[] = [
+  'retry',
+  'tentative',
+  'halt',
+  'escalate',
+] as const;
+
+export interface WorkflowStageControl {
+  entry_criteria?: string;
+  exit_criteria?: string;
+  acceptance_criteria?: string;
+  failure_handling?: WorkflowStageFailureHandling;
+  evidence_requirements?: string[];
+}
+
+export interface WorkflowStageSpec {
+  id: string;
+  name: string;
+  description: string;
+  inputs: string[];
+  output: string;
+  model_class: string;
+  gates?: string[];
+  control?: WorkflowStageControl;
+  workflow_ref?: string;
+  workflow?: WorkflowSpecBody;
+}
+
+export interface WorkflowEdgeSpec {
+  from: string;
+  to: string;
+  description: string;
+  when?: Record<string, unknown>;
+}
+
+export interface WorkflowGovernance {
+  evidence_requirements?: string[];
+  version_pinning?: string;
+  [key: string]: unknown;
+}
+
+export interface WorkflowStageOverride {
+  name?: string;
+  description?: string;
+  inputs?: string[];
+  output?: string;
+  model_class?: string;
+  gates?: string[];
+  control?: WorkflowStageControl;
+  workflow_ref?: string;
+  workflow?: WorkflowSpecBody;
+}
+
+/**
+ * The shape of a workflow definition without the artifact-base fields.
+ *
+ * Used for inline sub-workflows nested inside a `WorkflowStageSpec.workflow`
+ * field, where the surrounding artifact already carries `artifact_type` and
+ * `artifact_id`.
+ */
+export interface WorkflowSpecBody {
+  id: string;
+  name: string;
+  description: string;
+  goals: string[];
+  operating_mode: WorkflowOperatingMode;
+  mandatory_controls: string[];
+  stages: WorkflowStageSpec[];
+  edges: WorkflowEdgeSpec[];
+  recursive_promotion_target: string;
+  governance?: WorkflowGovernance;
+  extends?: string;
+  stage_overrides?: Record<string, WorkflowStageOverride>;
+}
+
+export interface WorkflowSpecV1 extends ArtifactBase, WorkflowSpecBody {
+  artifact_type: 'piorx/workflow-spec@1';
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +474,8 @@ export type Artifact =
   | AnalysisReportV1
   | ChangeSpecV1
   | ExecutionReportV1
-  | RecursiveIntentV1;
+  | RecursiveIntentV1
+  | WorkflowSpecV1;
 
 // ---------------------------------------------------------------------------
 // Typed lookup helper
