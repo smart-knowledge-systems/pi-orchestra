@@ -24,6 +24,7 @@
 
 import { generateArtifactId } from '../artifacts/ids.ts';
 import type {
+  AnalysisReportV1,
   ChangeSpecV1,
   ExecutionReportV1,
   ExpandedSpec,
@@ -934,9 +935,98 @@ export const synthesisStage: Stage<
       throw new Error(`synthesis stage: dispatch failed — ${result.message}`);
     }
 
+    // Honor the spec's acceptance_criteria at runtime.
+    //
+    // The default workflow declares for synthesis:
+    //   acceptance_criteria: "Output validates structurally AND contains at
+    //                         least one actionable element (a finding for
+    //                         analysis-report, an edit for change-spec)."
+    //   failure_handling:    'tentative'
+    //
+    // A structurally-valid artifact with zero findings (analysis-report) or
+    // zero edits (change-spec) is "valid but unfit" — the dispatch validator
+    // only checks shape; this adapter checks fitness and explicitly returns
+    // `failure_handling: 'tentative'` so the runtime decision is grounded in
+    // the actual artifact, not just inherited from the spec default. The
+    // notification + log surface the unfit case to the user and the audit
+    // trail so it isn't silently downstream-consumed as a fit deliverable.
+    const fitness = await assessSynthesisFitness(
+      ctx,
+      taskType,
+      result.synthesis_artifact_id,
+    );
+    await logIfPresent(services, 'stage5.acceptance_check', {
+      taskType,
+      synthesis_artifact_id: result.synthesis_artifact_id,
+      fit: fitness.fit,
+      reason: fitness.reason,
+    });
+    if (!fitness.fit) {
+      ui.notify(
+        `Synthesis output is structurally valid but unfit for downstream consumption: ${fitness.reason}. ` +
+          'Marked tentative — promote it explicitly before relying on it.',
+        'warning',
+      );
+      return {
+        output_artifact_id: result.synthesis_artifact_id,
+        failure_handling: 'tentative',
+      };
+    }
+
     return { output_artifact_id: result.synthesis_artifact_id };
   },
 };
+
+interface SynthesisFitness {
+  fit: boolean;
+  reason: string;
+}
+
+/**
+ * Check whether a freshly-produced synthesis artifact satisfies the default
+ * workflow's acceptance criteria — at least one actionable element.
+ *
+ * Loads the artifact from the store using the task type as a discriminator
+ * (analysis-report vs change-spec), then counts the actionable field
+ * (`findings` for analysis-report, `edits` for change-spec). Returns a
+ * structured result the caller can both surface to the user and log to the
+ * audit trail. A missing artifact resolves to `unfit` rather than throwing
+ * so the synthesis stage's contract — "produced an artifact id" — is not
+ * undermined by a transient lookup failure; downstream stages still see the
+ * tentative marker on the StageResult.
+ */
+async function assessSynthesisFitness(
+  ctx: StageContext,
+  taskType: SynthesisTaskType,
+  artifactId: string,
+): Promise<SynthesisFitness> {
+  if (taskType === 'analysis-report') {
+    const artifact = await ctx.store.get('piorx/analysis-report@1', artifactId);
+    if (!artifact) {
+      return { fit: false, reason: 'analysis-report artifact not found in store' };
+    }
+    return assessAnalysisReportFitness(artifact);
+  }
+  const artifact = await ctx.store.get('piorx/change-spec@1', artifactId);
+  if (!artifact) {
+    return { fit: false, reason: 'change-spec artifact not found in store' };
+  }
+  return assessChangeSpecFitness(artifact);
+}
+
+function assessAnalysisReportFitness(artifact: AnalysisReportV1): SynthesisFitness {
+  if (artifact.findings.length === 0) {
+    return { fit: false, reason: 'analysis-report has zero findings' };
+  }
+  return { fit: true, reason: `analysis-report has ${artifact.findings.length} findings` };
+}
+
+function assessChangeSpecFitness(artifact: ChangeSpecV1): SynthesisFitness {
+  if (artifact.edits.length === 0) {
+    return { fit: false, reason: 'change-spec has zero edits' };
+  }
+  return { fit: true, reason: `change-spec has ${artifact.edits.length} edits` };
+}
 
 function inferSynthesisTaskFromIntent(intent: string): SynthesisTaskType {
   // Mirrors the regex heuristic in the legacy `runSynthesisStage` so the
