@@ -82,7 +82,7 @@
       "dependencies": [
         "COMP-P1-T3"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "GateOutcome distinguishes technical failure, governance failure, and escalation",
         "GateOp is extensible for stage-specific operation shapes",
@@ -125,7 +125,7 @@
       "dependencies": [
         "COMP-P1-T1"
       ],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Spec validates as piorx/workflow-spec@1 at boot",
         "Six default stages (restatement, expansion, retrieval, evidence, synthesis, execution) declared with correct artifact-type inputs and outputs",
