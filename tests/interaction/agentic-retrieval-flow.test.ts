@@ -23,7 +23,12 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createConfig } from '../../src/runtime/config.ts';
+import {
+  createConfig,
+  type PhaseModelConfigs,
+  type PipelinePhaseId,
+  validatePhaseModelConfigs,
+} from '../../src/runtime/config.ts';
 import { ArtifactStore } from '../../src/artifacts/store.ts';
 import { StageMachine } from '../../src/conductor/stage-machine.ts';
 import { Stage1Controller, type RestateFunction } from '../../src/conductor/stage-1.ts';
@@ -596,6 +601,92 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     }
     for (const ev of bundle.raw_evidence) {
       expect(ev.path.endsWith('/src/core/model-resolver.ts')).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P2-T4 — Phase 2 gate: advisor=none for every phase preserves the E2E.
+//
+// Wires `config.models` with advisor.mode='none' for every PipelinePhaseId
+// and re-runs the canonical Stage 1 → retrieval → evidence flow. Today the
+// production callers exercised by this E2E do not invoke `runWithAdvisor`
+// directly (the helper is staged for Phase 3+), so wiring a non-trivial
+// `config.models` block is a defense-in-depth assertion that the runtime
+// kernel does not silently behave differently when models is populated.
+// ---------------------------------------------------------------------------
+
+describe('agentic retrieval flow — Phase 2 gate (advisor=none everywhere)', () => {
+  const ALL_PIPELINE_PHASES: PipelinePhaseId[] = [
+    'restatement',
+    'expansion',
+    'retrieval',
+    'synthesis',
+    'execution',
+  ];
+
+  function buildAdvisorNoneConfigs(): PhaseModelConfigs {
+    const block: PhaseModelConfigs = {};
+    for (const phase of ALL_PIPELINE_PHASES) {
+      block[phase] = {
+        executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        advisor: { mode: 'none' },
+      };
+    }
+    return block;
+  }
+
+  test('default pipeline produces the same evidence bundle with advisor=none wired across every phase', async () => {
+    config.models = buildAdvisorNoneConfigs();
+    const validation = validatePhaseModelConfigs(config.models);
+    expect(validation.ok).toBe(true);
+
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    const dispatchResult = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(dispatchResult.status).toBe('success');
+    const index = (await store.get(
+      'piorx/retrieval-index@1',
+      dispatchResult.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+
+    const plan = createRecommendedEvidencePlan(index);
+    await store.put(plan);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    expect(result.status).toBe('success');
+
+    const bundle = (await store.get(
+      'piorx/evidence-bundle@1',
+      result.evidence_bundle_id!,
+    )) as EvidenceBundleV1;
+
+    // Same shape invariants as the baseline E2E: bundle paths align with
+    // the plan; reserve files stay out of raw_evidence.
+    const planFileIds = new Set(plan.selection.files.map((f) => f.file_id));
+    const bundlePaths = new Set(bundle.structural_context.files.map((f) => f.path));
+    const planPaths = new Set(
+      index.files.filter((f) => planFileIds.has(f.file_id)).map((f) => f.path),
+    );
+    expect(bundlePaths).toEqual(planPaths);
+    for (const ev of bundle.raw_evidence) {
+      expect(planPaths.has(ev.path)).toBe(true);
     }
   });
 });

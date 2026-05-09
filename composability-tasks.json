@@ -326,7 +326,7 @@
         "tests/interaction/agentic-retrieval-flow.test.ts"
       ],
       "dependencies": ["COMP-P2-T2", "COMP-P2-T3"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "All 497 existing tests pass with advisor.mode=none",
         "Stubbed advisor produces telemetry without changing executor output",
