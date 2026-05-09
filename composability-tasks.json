@@ -123,7 +123,7 @@
       "deliverable": "WorkflowExecutor capable of running the default workflow spec end-to-end",
       "files": ["src/runtime/workflow-executor.ts"],
       "dependencies": ["COMP-P1-T5", "COMP-P1-T6"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Executor.run(workflowId, initialInput, ctx) walks the spec, executes stages, runs gates, and returns the final artifact",
         "Conditional edges fire on artifact type (e.g. synthesis -> execution skipped for analysis-report outputs)",
@@ -181,7 +181,7 @@
       "deliverable": "evidence.review gate registered and resolved through the new gate primitive",
       "files": ["src/conductor/evidence-overrides.ts", "src/runtime/registry.ts"],
       "dependencies": ["COMP-P1-T4", "COMP-P1-T5"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "EvidenceOverride union is exported as a concrete GateOp",
         "evidence.review gate is registered and runs after the evidence stage",
@@ -215,7 +215,7 @@
       "deliverable": "Lineage records the data needed for governance forward-compatibility and source-access auditing",
       "files": ["src/runtime/session-state.ts"],
       "dependencies": ["COMP-P1-T6"],
-      "status": "planned",
+      "status": "completed",
       "acceptance_criteria": [
         "Each lineage entry carries stage id, gate outcome (with kind), role, and workflow_spec_id",
         "Source-access events appear in lineage from retrieval and any other source-reading stage",
