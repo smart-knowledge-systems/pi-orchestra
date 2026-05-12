@@ -253,11 +253,19 @@ export function transitionStage(
     if (extras?.stage_id !== undefined) entry.stage_id = extras.stage_id;
     if (extras?.workflow_spec_id !== undefined) entry.workflow_spec_id = extras.workflow_spec_id;
     if (extras?.role !== undefined) entry.role = extras.role;
-    if (extras?.gate_decisions !== undefined) entry.gate_decisions = extras.gate_decisions;
-    if (extras?.source_access_events !== undefined) {
-      entry.source_access_events = extras.source_access_events;
+    // Defensively clone caller-owned object/array fields so later mutation
+    // of the caller's value cannot rewrite historical lineage entries.
+    // Audit immutability is part of the §19 minimum control baseline; a
+    // by-reference store would silently break it.
+    if (extras?.gate_decisions !== undefined) {
+      entry.gate_decisions = structuredClone(extras.gate_decisions);
     }
-    if (extras?.sub_lineage !== undefined) entry.sub_lineage = extras.sub_lineage;
+    if (extras?.source_access_events !== undefined) {
+      entry.source_access_events = structuredClone(extras.source_access_events);
+    }
+    if (extras?.sub_lineage !== undefined) {
+      entry.sub_lineage = structuredClone(extras.sub_lineage);
+    }
     lineage.push(entry);
   }
   return {
@@ -277,7 +285,10 @@ export function transitionStage(
 export function appendLineageEntry(state: SessionState, entry: LineageEntry): SessionState {
   return {
     ...state,
-    lineage: [...state.lineage, entry],
+    // Deep-clone before append so subsequent mutation of the caller's
+    // entry value cannot rewrite the persisted record. See
+    // `transitionStage` above for the same defense.
+    lineage: [...state.lineage, structuredClone(entry)],
     updated_at: new Date().toISOString(),
   };
 }
