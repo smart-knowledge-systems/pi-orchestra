@@ -563,4 +563,40 @@ describe('WorkflowRegistry — workflow_ref conformance', () => {
     const registry = setupRefTestRegistry({ host, referenced });
     expect(() => registry.validate()).not.toThrow();
   });
+
+  test('workflow_ref cycle (mutual cross-reference) is rejected at validate()', () => {
+    // Two registered workflows whose `workflow_ref` stages point at each
+    // other pass every other check but would stack-overflow the executor
+    // in `runSubWorkflowStage → runSpec → runSubWorkflowStage` if descent
+    // were permitted at runtime. Inline `workflow:` blocks get this
+    // visited-set guard via `checkSubWorkflows`; `workflow_ref` needs the
+    // equivalent at boot or the runtime can never trust the spec graph.
+    const referenced = buildReferencedWorkflow({
+      // The referenced workflow's sub.dummy stage references back at the
+      // host, closing the cycle.
+      stages: [
+        {
+          id: 'sub.dummy',
+          name: 'dummy',
+          description: 'placeholder sub stage that loops back',
+          inputs: ['piorx/evidence-bundle@1'],
+          output: 'piorx/analysis-report@1',
+          model_class: 'llm',
+          gates: ['intent.approval', 'execution.allow_edits'],
+          workflow_ref: 'piorx/workflow/ref-host@1',
+        },
+      ],
+    });
+    const host = buildHostSpecWithWorkflowRef(referenced.id);
+    const registry = setupRefTestRegistry({ host, referenced });
+    try {
+      registry.validate();
+      throw new Error('expected validate() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorkflowRegistryError);
+      const message = (err as WorkflowRegistryError).message;
+      expect(message).toMatch(/workflow_ref cycle detected/);
+      expect(message).toMatch(/piorx\/workflow\/ref-host@1/);
+    }
+  });
 });

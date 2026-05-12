@@ -198,6 +198,17 @@ export class WorkflowRegistry {
           `stage "${stage.id}" already registered with stricter failure_handling="${existing.control?.failure_handling ?? 'halt'}"; cannot replace with weaker "${stage.control?.failure_handling ?? 'halt'}"`,
         ]);
       }
+      // Equal strictness is the silent-replacement trap per "Drift is
+      // rejected loudly": accidental re-registration (a test/extension
+      // double-registering the same id) would shadow the prior adapter
+      // with no diagnostic. Require the replacement adapter to be
+      // strictly stricter to be a meaningful "platform-policy prevails"
+      // override — otherwise reject so the caller has to confirm intent.
+      if (incomingStrictness === currentStrictness) {
+        throw new WorkflowRegistryError([
+          `stage "${stage.id}" already registered with equal failure_handling="${existing.control?.failure_handling ?? 'halt'}"; refusing silent replacement (re-registration must declare strictly stricter failure_handling)`,
+        ]);
+      }
     }
     this.stages.set(stage.id, stage);
   }
@@ -338,6 +349,46 @@ export class WorkflowRegistry {
     }
     if (violations.length > 0) {
       throw new WorkflowRegistryError(violations);
+    }
+  }
+
+  /**
+   * Walk a `workflow_ref` chain starting at `rootId` and surface any cycle
+   * — i.e. a referenced workflow that transitively references an ancestor
+   * in the chain. Inline `workflow:` blocks have their own visited-set
+   * cycle guard in `checkSubWorkflows`; this is the equivalent for
+   * cross-workflow `workflow_ref` resolution. Without it, a pair of
+   * registered workflows that mutually reference each other would pass
+   * boot validation and stack-overflow the executor at runtime in
+   * `runSubWorkflowStage → runSpec → runSubWorkflowStage`.
+   */
+  private checkWorkflowRefCycle(
+    rootId: string,
+    refId: string,
+    parentStageId: string,
+    visited: Set<string>,
+    violations: string[],
+  ): void {
+    if (visited.has(refId)) {
+      violations.push(
+        `workflow "${rootId}" stage "${parentStageId}": workflow_ref cycle detected (id "${refId}" already in chain)`,
+      );
+      return;
+    }
+    const referenced = this.workflows.get(refId);
+    if (!referenced) return;
+    const nextVisited = new Set(visited);
+    nextVisited.add(refId);
+    for (const childStage of referenced.stages) {
+      if (childStage.workflow_ref) {
+        this.checkWorkflowRefCycle(
+          rootId,
+          childStage.workflow_ref,
+          `${parentStageId} → ${refId}.${childStage.id}`,
+          nextVisited,
+          violations,
+        );
+      }
     }
   }
 
@@ -647,6 +698,12 @@ export class WorkflowRegistry {
         );
       }
     }
+    // Cross-workflow cycle detection — inline `workflow:` blocks get this
+    // via `checkSubWorkflows`'s visited-set; `workflow_ref` needs the
+    // equivalent guard or the executor stack-overflows when two registered
+    // workflows reference each other through their workflow_ref chain.
+    const visited = new Set<string>([parent.id]);
+    this.checkWorkflowRefCycle(parent.id, refId, parentStageId, visited, violations);
   }
 }
 

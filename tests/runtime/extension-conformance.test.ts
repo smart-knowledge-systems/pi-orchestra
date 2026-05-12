@@ -203,6 +203,41 @@ describe('extension-conformance — overlapping a stage id with weaker access po
     expect(caught?.message ?? '').toMatch(/execution/);
   });
 
+  test('Stage adapter re-registration with equal failure_handling is rejected (no silent replacement)', () => {
+    // Equal strictness is a quieter silent-replacement trap than the
+    // strictly-weaker case above: a test or extension that accidentally
+    // re-registers the same stage id would otherwise shadow the prior
+    // adapter without any diagnostic. The registry refuses both shapes
+    // so re-registration must be intentional.
+    const registry = new WorkflowRegistry();
+    registry.registerStage({
+      id: 'execution',
+      inputs: ['piorx/change-spec@1'],
+      output: 'piorx/execution-report@1',
+      control: { failure_handling: 'halt' },
+      async run(): Promise<StageResult> {
+        return { output_artifact_id: 'noop' };
+      },
+    } as Stage);
+    let caught: WorkflowRegistryError | undefined;
+    try {
+      registry.registerStage({
+        id: 'execution',
+        inputs: ['piorx/change-spec@1'],
+        output: 'piorx/execution-report@1',
+        control: { failure_handling: 'halt' },
+        async run(): Promise<StageResult> {
+          return { output_artifact_id: 'noop' };
+        },
+      } as Stage);
+    } catch (err) {
+      caught = err as WorkflowRegistryError;
+    }
+    expect(caught).toBeInstanceOf(WorkflowRegistryError);
+    expect(caught?.message ?? '').toMatch(/equal failure_handling/i);
+    expect(caught?.message ?? '').toMatch(/execution/);
+  });
+
   test('GateSpec re-registration with the same id on the same stage is rejected', () => {
     // The registry's gate-id uniqueness rule is the platform's defense
     // against an extension shadowing a parent's GateSpec with a weaker
