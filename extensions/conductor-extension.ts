@@ -303,6 +303,20 @@ async function buildAdvisorCallback(
     };
   }
 
+  // The static type says `executor` is required, but config can be
+  // hand-built or loaded from JSON without going through
+  // `validatePhaseModelConfigs`. Guard so a malformed advisor-only
+  // config surfaces as a clear unconfigured reason instead of a
+  // `cannot read provider of undefined` runtime crash.
+  if (!phaseConfig.executor) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: phase "${phase}" has an advisor configured but no executor ` +
+        `(set runtime.config.models.${phase}.executor)`,
+    };
+  }
+
   const advisorProvider = phaseConfig.executor.provider;
   const advisorModelEntry = ctx.modelRegistry.find(advisorProvider, advisorConfig.model);
   if (!advisorModelEntry) {
