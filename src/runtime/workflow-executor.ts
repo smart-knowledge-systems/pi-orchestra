@@ -847,7 +847,15 @@ export class WorkflowExecutor {
     // has the live `session` getter) so the assignment preserves the getter
     // — copying via `{...base}` would call the getter once and freeze the
     // value at build time.
-    Object.assign(base, this.contextExtras);
+    //
+    // `session` is reserved — `base` exposes it as a setter-less accessor
+    // (so adapter mutations via `setArtifactPointer` propagate). Assigning
+    // to a setter-less accessor in strict-mode (every TS ESM module)
+    // throws a TypeError, so we drop a stale `session` key from extras
+    // rather than crash the stage-context build.
+    const { session: _drop, ...safeExtras } = this.contextExtras;
+    void _drop;
+    Object.assign(base, safeExtras);
     return base as StageContext;
   }
 

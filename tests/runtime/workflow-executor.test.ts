@@ -411,6 +411,30 @@ describe('WorkflowExecutor — error surfaces', () => {
       executor.run('test/workflow/exec@1', { startStageId: 'no-such-stage' }),
     ).rejects.toThrow(/startStageId/);
   });
+
+  test('contextExtras with a session key does not crash the stage-context build', async () => {
+    // `base` exposes `session` as a setter-less accessor so adapter
+    // mutations via `setArtifactPointer` propagate. Strict-mode assignment
+    // to a setter-less accessor would throw `TypeError` if the caller
+    // passed a stale `session` in contextExtras; the executor drops the
+    // reserved key from extras rather than crash at context-build time.
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(buildSpec());
+    registry.registerStage(captureStage());
+    registry.registerStage(restateStage());
+    registry.registerStage(synthStage('analysis-report'));
+    const session = freshSession();
+    const executor = new WorkflowExecutor({
+      registry,
+      store,
+      session,
+      model: NULL_MODEL,
+      // Stale snapshot smuggled in by a misbehaving host.
+      contextExtras: { session: { stale: true } },
+    });
+    const result = await executor.run('test/workflow/exec@1');
+    expect(result.stage_runs.map((r) => r.stage_id)).toEqual(['capture', 'restate', 'synth']);
+  });
 });
 
 describe('WorkflowExecutor — gates', () => {
