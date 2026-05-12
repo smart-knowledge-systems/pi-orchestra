@@ -27,7 +27,12 @@
  * — it operates entirely on already-parsed artifacts and TypeScript objects.
  */
 
-import { ARTIFACT_TYPES, type ArtifactType, type WorkflowSpecV1 } from '../artifacts/types.ts';
+import {
+  ARTIFACT_TYPES,
+  type ArtifactType,
+  type WorkflowSpecBody,
+  type WorkflowSpecV1,
+} from '../artifacts/types.ts';
 import { validateArtifact } from '../artifacts/schemas.ts';
 import { evidenceReviewGate } from '../conductor/evidence-overrides.ts';
 import type { GateOp, GateOpValidation, GateSpec } from './gate.ts';
@@ -366,7 +371,7 @@ export class WorkflowRegistry {
     rootId: string,
     refId: string,
     parentStageId: string,
-    visited: Set<string>,
+    visited: ReadonlySet<string>,
     violations: string[],
   ): void {
     if (visited.has(refId)) {
@@ -379,17 +384,10 @@ export class WorkflowRegistry {
     if (!referenced) return;
     const nextVisited = new Set(visited);
     nextVisited.add(refId);
-    for (const childStage of referenced.stages) {
-      if (childStage.workflow_ref) {
-        this.checkWorkflowRefCycle(
-          rootId,
-          childStage.workflow_ref,
-          `${parentStageId} → ${refId}.${childStage.id}`,
-          nextVisited,
-          violations,
-        );
-      }
-    }
+    // Walk the referenced workflow's stages — including any inline
+    // `workflow:` blocks they declare — so a `workflow_ref` nested inside
+    // an inline sub-spec is still subject to cycle detection.
+    this.walkRefCycleBody(rootId, referenced, parentStageId, nextVisited, violations);
   }
 
   // -----------------------------------------------------------------------
@@ -565,15 +563,20 @@ export class WorkflowRegistry {
           );
         }
       }
-      // workflow_ref reference resolution + authority/control conformance.
-      // Inline `workflow:` blocks are validated structurally at registration
-      // time by checkSubWorkflows; workflow_ref points at another registered
-      // workflow and so its checks are referential and live here. Both
-      // forms enforce the same invariants per docs/composability.md
-      // "Workflows also nest": sub-workflow operating_mode <= parent's,
-      // mandatory_controls propagate downward additively only.
+      // workflow_ref reference resolution + authority/control conformance
+      // for TOP-LEVEL stages. Inline `workflow:` blocks may themselves
+      // contain stages that declare `workflow_ref` — those are handled by
+      // the tree-walking pass at the bottom of this method, since they
+      // can re-enter the registered-workflow graph and need the same
+      // cycle/authority/control checks the top-level form gets.
       if (stageSpec.workflow_ref) {
-        this.checkWorkflowRefStage(spec, stageSpec.id, stageSpec.workflow_ref, violations);
+        this.checkWorkflowRefStage(
+          spec,
+          stageSpec.id,
+          stageSpec.workflow_ref,
+          new Set([spec.id]),
+          violations,
+        );
       }
       // Stage implementation present and matching. Stages that declare a
       // sub-workflow (workflow_ref or inline workflow:) do not require a
@@ -647,6 +650,65 @@ export class WorkflowRegistry {
         `workflow "${spec.id}": recursive_promotion_target "${spec.recursive_promotion_target}" does not match any stage id`,
       );
     }
+
+    // Walk every inline `workflow:` block declared anywhere in this spec
+    // (including nested inline blocks) and apply the same `workflow_ref`
+    // checks the top-level loop applies. Without this pass, a stage
+    // nested inside an inline sub-workflow could declare `workflow_ref`
+    // back into an ancestor and bypass cycle detection entirely (the top
+    // loop only iterates `spec.stages`, and `checkSubWorkflows` only
+    // looked at inline children's authority/controls — not their
+    // workflow_ref entries).
+    this.checkInlineWorkflowRefs(spec, spec, new Set([spec.id]), '', violations);
+  }
+
+  /**
+   * Walk a spec body's stages recursively, descending into inline
+   * `workflow:` blocks, and at every nested `workflow_ref` apply the
+   * `checkWorkflowRefStage` checks (existence + authority + control
+   * propagation + cycle). `ancestors` tracks every workflow id already in
+   * the nesting chain so a workflow_ref that re-enters an inline-parent
+   * is detected.
+   */
+  private checkInlineWorkflowRefs(
+    rootSpec: WorkflowSpecV1,
+    body: WorkflowSpecBody,
+    ancestors: ReadonlySet<string>,
+    pathPrefix: string,
+    violations: string[],
+  ): void {
+    for (const stage of body.stages) {
+      const stagePath = pathPrefix + stage.id;
+      if (stage.workflow) {
+        // Descend through the inline sub-workflow with extended ancestor
+        // chain so workflow_refs found inside it are cycle-checked
+        // against every parent id in the chain.
+        const inlineAncestors = new Set(ancestors);
+        inlineAncestors.add(stage.workflow.id);
+        // Inside the inline body, check workflow_ref entries on its
+        // stages — these are the entries the original top-level loop
+        // missed entirely.
+        for (const childStage of stage.workflow.stages) {
+          if (childStage.workflow_ref) {
+            this.checkWorkflowRefStage(
+              rootSpec,
+              `${stagePath}.${childStage.id}`,
+              childStage.workflow_ref,
+              inlineAncestors,
+              violations,
+            );
+          }
+        }
+        // Recurse for deeper inline nesting.
+        this.checkInlineWorkflowRefs(
+          rootSpec,
+          stage.workflow,
+          inlineAncestors,
+          `${stagePath}.`,
+          violations,
+        );
+      }
+    }
   }
 
   /**
@@ -677,6 +739,7 @@ export class WorkflowRegistry {
     parent: WorkflowSpecV1,
     parentStageId: string,
     refId: string,
+    ancestors: ReadonlySet<string>,
     violations: string[],
   ): void {
     const referenced = this.workflows.get(refId);
@@ -702,8 +765,59 @@ export class WorkflowRegistry {
     // via `checkSubWorkflows`'s visited-set; `workflow_ref` needs the
     // equivalent guard or the executor stack-overflows when two registered
     // workflows reference each other through their workflow_ref chain.
-    const visited = new Set<string>([parent.id]);
-    this.checkWorkflowRefCycle(parent.id, refId, parentStageId, visited, violations);
+    // `ancestors` carries every workflow id already in the nesting chain
+    // (root spec + every inline parent), so a workflow_ref that re-enters
+    // an inline-ancestor (A → inline B → workflow_ref A) is also caught.
+    this.checkWorkflowRefCycle(parent.id, refId, parentStageId, ancestors, violations);
+  }
+
+  /**
+   * Walk a registered workflow body's stages (recursing into inline
+   * `workflow:` blocks) and check every `workflow_ref` for cycles against
+   * the given `visited` set. The pair `checkWorkflowRefCycle` ↔
+   * `walkRefCycleBody` together cover the full mixed-mode cycle scenario:
+   * a referenced workflow B's stages may themselves declare inline
+   * `workflow:` blocks AND additional `workflow_ref` entries, and any of
+   * those re-entering an ancestor id (the original root or any inline
+   * intermediate) closes a cycle that would otherwise stack-overflow at
+   * runtime descent.
+   */
+  private walkRefCycleBody(
+    rootId: string,
+    body: WorkflowSpecBody,
+    parentStageChain: string,
+    visited: ReadonlySet<string>,
+    violations: string[],
+  ): void {
+    for (const childStage of body.stages) {
+      if (childStage.workflow_ref) {
+        this.checkWorkflowRefCycle(
+          rootId,
+          childStage.workflow_ref,
+          `${parentStageChain} → ${body.id}.${childStage.id}`,
+          visited,
+          violations,
+        );
+      }
+      if (childStage.workflow) {
+        const inlineId = childStage.workflow.id;
+        if (visited.has(inlineId)) {
+          violations.push(
+            `workflow "${rootId}" stage "${parentStageChain} → ${body.id}.${childStage.id}": inline workflow cycle detected (id "${inlineId}" already in chain)`,
+          );
+          continue;
+        }
+        const nextVisited = new Set(visited);
+        nextVisited.add(inlineId);
+        this.walkRefCycleBody(
+          rootId,
+          childStage.workflow,
+          parentStageChain,
+          nextVisited,
+          violations,
+        );
+      }
+    }
   }
 }
 

@@ -564,6 +564,55 @@ describe('WorkflowRegistry — workflow_ref conformance', () => {
     expect(() => registry.validate()).not.toThrow();
   });
 
+  test('workflow_ref nested inside an inline workflow that targets an ancestor is rejected at validate()', () => {
+    // Greptile-flagged mixed-mode cycle: top-level workflow A declares a
+    // stage with an INLINE workflow B; B's stage declares `workflow_ref:
+    // A`. The visited-set cycle guards on either form alone would miss
+    // this — `checkSubWorkflows` doesn't look at workflow_ref entries,
+    // and the top-level workflow_ref pass doesn't recurse into inline
+    // blocks. The validator must walk the full spec tree.
+    const referencedBackToHost = 'piorx/workflow/ref-host@1';
+    const innerSub = buildSubWorkflow({
+      id: 'piorx/workflow/inner-cycle@1',
+      stages: [
+        {
+          id: 'inner.ref-back',
+          name: 'inner ref back',
+          description: 'inline-nested stage that workflow_refs an ancestor',
+          inputs: ['piorx/evidence-bundle@1'],
+          output: 'piorx/analysis-report@1',
+          model_class: 'llm',
+          workflow_ref: referencedBackToHost,
+        },
+      ],
+      recursive_promotion_target: 'inner.ref-back',
+    });
+    // Build the host so it (a) inlines `innerSub` on a stage and (b) is
+    // registered under the id `innerSub`'s ref points back at.
+    const base = loadDefaultWorkflow();
+    const host: WorkflowSpecV1 = {
+      ...base,
+      id: referencedBackToHost,
+      artifact_id: `${base.artifact_id}-inline-cycle-host`,
+      stages: base.stages.map((s) => (s.id === 'synthesis' ? { ...s, workflow: innerSub } : s)),
+    };
+    const registry = new WorkflowRegistry();
+    registry.registerWorkflow(host);
+    // Register the bare stages the host's non-inlined stages still need
+    // for `checkWorkflowReferences` to reach the inline tree-walk pass.
+    registerDefaultStages(registry);
+    registerAllDefaultGates(registry);
+    try {
+      registry.validate();
+      throw new Error('expected validate() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorkflowRegistryError);
+      const message = (err as WorkflowRegistryError).message;
+      expect(message).toMatch(/workflow_ref cycle detected/);
+      expect(message).toMatch(/piorx\/workflow\/ref-host@1/);
+    }
+  });
+
   test('workflow_ref cycle (mutual cross-reference) is rejected at validate()', () => {
     // Two registered workflows whose `workflow_ref` stages point at each
     // other pass every other check but would stack-overflow the executor
