@@ -285,6 +285,11 @@ function buildSubmitRecommendationTool(
         ctx.state.warnings.push(
           `submit_recommendation: invalid recommendation payload — using fallback`,
         );
+        // Record the parse failure on the run's stopReason so telemetry
+        // distinguishes "model submitted garbage" from "model ran out of
+        // turns" — the post-loop catch-block at line 492 also relies on
+        // `parse_error` to suppress reclassification to `model_error`.
+        ctx.state.stopReason = 'parse_error';
         return {
           content: [
             { type: 'text', text: 'submit_recommendation rejected: invalid payload shape.' },
@@ -406,7 +411,10 @@ export async function runRetrieverAgentLoop(
     buildSearchContentTool(ctx),
     buildSearchPathsTool(ctx),
     buildFollowImportsTool(ctx),
-    buildAdvisorTool(ctx),
+    // Only register the advisor tool when an advisor is actually wired.
+    // Otherwise the model gets a guaranteed-no-op tool that returns
+    // `advisor_not_wired` and burns a retrieval turn under the round cap.
+    ...(ctx.advisor ? [buildAdvisorTool(ctx)] : []),
     buildSubmitRecommendationTool(ctx),
   ] as unknown as AgentTool<TSchema>[];
 
@@ -479,7 +487,16 @@ export async function runRetrieverAgentLoop(
     }
   } catch (err) {
     state.warnings.push(`agentLoop threw: ${err instanceof Error ? err.message : String(err)}`);
-    if (state.stopReason === 'round_cap') state.stopReason = 'model_error';
+    // `transformContext` sets `state.stopReason = 'round_cap'` (and
+    // `submit_recommendation` sets `'agent_stopped'`) before triggering
+    // the abort that surfaces here as a thrown error. Both are
+    // intentional terminal states; only unclassified throws are model
+    // errors. Preserve intentional stop reasons so downstream telemetry
+    // and fallback-messaging branches (e.g. the `agent_stopped` fallback
+    // reason synthesis below) see the true cause.
+    if (state.stopReason !== 'round_cap' && state.stopReason !== 'agent_stopped') {
+      state.stopReason = 'model_error';
+    }
   }
 
   // If the last assistant message is an error / aborted message and we

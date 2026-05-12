@@ -396,6 +396,7 @@ describe('runRetrieverAgentLoop stop reasons', () => {
     // The malformed recommendation is rejected at the tool boundary (warn
     // recorded), the loop runs to its turn cap, and the deterministic
     // fallback is synthesized.
+    expect(result.telemetry.stopReason).toBe('parse_error');
     expect(result.telemetry.warnings.some((w) => w.includes('invalid'))).toBe(true);
     expect(result.recommendation.strategy_summary).toContain('fallback');
   });
