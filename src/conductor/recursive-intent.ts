@@ -2,8 +2,11 @@
  * Conductor module for recursive intent promotion and session restart.
  *
  * Coordinates artifact promotion (synthesis output → recursive-intent-v1)
- * with session state reset so the conductor restarts at Stage 1 with a
- * new verbatim intent, while preserving prior lineage in session metadata.
+ * with session state reset so the conductor restarts at the active
+ * workflow spec's `recursive_promotion_target` stage with a new verbatim
+ * intent, while preserving prior lineage in session metadata. The target
+ * stage is read from the loaded spec via `StageMachine.recursivePromotionTarget`
+ * — there is no hardcoded fallback.
  */
 
 import type { ArtifactStore } from '../artifacts/store.ts';
@@ -40,17 +43,19 @@ export interface PromotionResult {
  *
  * 1. Calls the artifact-promote service to create a recursive-intent-v1.
  * 2. Records the recursive intent in session lineage.
- * 3. Resets the stage machine to idle (Stage 1 entry point).
+ * 3. Resets the stage machine to idle so the conductor re-enters the
+ *    workflow at the spec-declared `recursive_promotion_target` on the
+ *    next cycle.
  * 4. Preserves all prior artifact IDs in session lineage history.
  *
- * The caller should then initiate Stage 1 with the new verbatim intent.
+ * The caller dispatches the next cycle using
+ * `machine.recursivePromotionTarget` — no stage id is hardcoded here.
  */
 export async function promoteAndRestart(
   input: ArtifactPromoteInput,
   store: ArtifactStore,
   machine: StageMachine,
 ): Promise<PromotionResult> {
-  // Step 1: Create recursive-intent-v1 via promotion service
   const promoteResult = await artifactPromote(input, store);
 
   if (promoteResult.status !== 'success' || !promoteResult.recursive_intent_id) {
@@ -61,20 +66,23 @@ export async function promoteAndRestart(
     };
   }
 
-  // Step 2: Transition to idle via the stage machine's normal path.
-  // This records the recursive intent ID in the lineage history and
-  // moves to idle (Stage 1 entry point). The transition preserves all
-  // prior lineage entries.
+  const target = machine.recursivePromotionTarget;
+
+  // Transition to idle via the stage machine's normal path. This records
+  // the recursive intent ID in the lineage history and parks the workflow
+  // at idle so the next cycle can re-enter at the spec's
+  // `recursive_promotion_target`. The transition preserves all prior
+  // lineage entries.
   await machine.transition('idle', promoteResult.recursive_intent_id);
 
-  // Step 3: Reset artifact pointers so the next cycle starts clean,
-  // while keeping the lineage intact.
+  // Reset artifact pointers so the next cycle starts clean while keeping
+  // the lineage intact.
   await machine.reset();
 
   return {
     status: 'success',
     recursive_intent_id: promoteResult.recursive_intent_id,
-    message: `Session restarted at Stage 1. Recursive intent: ${promoteResult.recursive_intent_id}`,
+    message: `Session restarted at "${target}". Recursive intent: ${promoteResult.recursive_intent_id}`,
   };
 }
 
@@ -84,7 +92,7 @@ export async function promoteAndRestart(
  * Only analysis-report-v1 and change-spec-v1 are promotable.
  */
 export function canPromote(artifactType: string): boolean {
-  return artifactType === 'analysis-report-v1' || artifactType === 'change-spec-v1';
+  return artifactType === 'piorx/analysis-report@1' || artifactType === 'piorx/change-spec@1';
 }
 
 /**

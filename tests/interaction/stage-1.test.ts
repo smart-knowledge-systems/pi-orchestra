@@ -76,13 +76,13 @@ describe('Stage 1 — intent capture and restatement', () => {
     it('creates and persists an intent-capture-v1 artifact', async () => {
       const capture = await controller.captureIntent('Fix the login bug');
 
-      expect(capture.artifact_type).toBe('intent-capture-v1');
+      expect(capture.artifact_type).toBe('piorx/intent-capture@1');
       expect(capture.user_intent_verbatim).toBe('Fix the login bug');
       expect(capture.tagged_files).toEqual([]);
       expect(capture.artifact_id).toMatch(/^intent_/);
 
       // Verify persisted
-      const loaded = await store.get('intent-capture-v1', capture.artifact_id);
+      const loaded = await store.get('piorx/intent-capture@1', capture.artifact_id);
       expect(loaded).toEqual(capture);
     });
 
@@ -151,7 +151,7 @@ describe('Stage 1 — intent capture and restatement', () => {
       });
 
       const newId = machine.sessionState.artifacts.intent_capture_id!;
-      const newCapture = await store.get('intent-capture-v1', newId);
+      const newCapture = await store.get('piorx/intent-capture@1', newId);
       expect(newCapture?.user_intent_verbatim).toBe('Corrected intent');
       expect(newCapture?.cleaned_user_intent).toBe('Corrected intent');
       expect(newCapture?.intent_file_refs).toEqual([{ path: 'src/a.ts', source: 'inline' }]);
@@ -255,7 +255,7 @@ describe('Stage 1 — intent capture and restatement', () => {
 
       // Session state should point to the new capture
       const newCaptureId = machine.sessionState.artifacts.intent_capture_id!;
-      const newCapture = await store.get('intent-capture-v1', newCaptureId);
+      const newCapture = await store.get('piorx/intent-capture@1', newCaptureId);
       expect(newCapture?.user_intent_verbatim).toBe('Corrected intent');
     });
 
@@ -267,7 +267,7 @@ describe('Stage 1 — intent capture and restatement', () => {
       });
 
       const newCaptureId = machine.sessionState.artifacts.intent_capture_id!;
-      const newCapture = await store.get('intent-capture-v1', newCaptureId);
+      const newCapture = await store.get('piorx/intent-capture@1', newCaptureId);
       expect(newCapture?.tagged_files).toEqual(['src/main.ts']);
     });
   });
@@ -296,14 +296,14 @@ describe('Stage 1 — intent capture and restatement', () => {
         expand: false,
       });
 
-      expect(result.intent_restatement.artifact_type).toBe('intent-restatement-v1');
+      expect(result.intent_restatement.artifact_type).toBe('piorx/intent-restatement@1');
       expect(result.intent_restatement.approved).toBe(true);
       expect(result.intent_restatement.restated_intent).toBe('Restatement: Fix the login bug');
       expect(result.intent_restatement.approval_turns).toBe(1);
 
       // Verify persisted
       const loaded = await store.get(
-        'intent-restatement-v1',
+        'piorx/intent-restatement@1',
         result.intent_restatement.artifact_id,
       );
       expect(loaded).toEqual(result.intent_restatement);

@@ -36,7 +36,7 @@ afterEach(async () => {
 
 function makeAnalysisReport(): AnalysisReportV1 {
   return {
-    artifact_type: 'analysis-report-v1',
+    artifact_type: 'piorx/analysis-report@1',
     artifact_id: 'analysis_promo_001',
     evidence_bundle_id: 'bundle_promo_001',
     summary: 'Auth middleware stores session tokens in plaintext',
@@ -48,7 +48,7 @@ function makeAnalysisReport(): AnalysisReportV1 {
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_promo_001',
     evidence_bundle_id: 'bundle_promo_002',
     change_goal: 'Encrypt session tokens in auth middleware',
@@ -77,7 +77,7 @@ describe('artifact promotion to recursive intent', () => {
     await store.put(report);
 
     const input: ArtifactPromoteInput = {
-      source_artifact_type: 'analysis-report-v1',
+      source_artifact_type: 'piorx/analysis-report@1',
       source_artifact_id: report.artifact_id,
       new_user_intent_verbatim: 'Encrypt session tokens as recommended in the analysis',
     };
@@ -92,7 +92,7 @@ describe('artifact promotion to recursive intent', () => {
     await store.put(spec);
 
     const input: ArtifactPromoteInput = {
-      source_artifact_type: 'change-spec-v1',
+      source_artifact_type: 'piorx/change-spec@1',
       source_artifact_id: spec.artifact_id,
       new_user_intent_verbatim: 'Also add token rotation after encryption',
     };
@@ -108,7 +108,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up on analysis findings',
       },
@@ -116,11 +116,11 @@ describe('artifact promotion to recursive intent', () => {
     );
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
-    expect(intent.source_artifact_type).toBe('analysis-report-v1');
+    expect(intent.source_artifact_type).toBe('piorx/analysis-report@1');
     expect(intent.source_artifact_id).toBe(report.artifact_id);
   });
 
@@ -131,7 +131,7 @@ describe('artifact promotion to recursive intent', () => {
     const verbatim = 'Implement the recommended next steps from the analysis';
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: verbatim,
       },
@@ -139,7 +139,7 @@ describe('artifact promotion to recursive intent', () => {
     );
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
@@ -152,7 +152,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up',
       },
@@ -160,7 +160,7 @@ describe('artifact promotion to recursive intent', () => {
     );
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
@@ -173,14 +173,14 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'change-spec-v1',
+        source_artifact_type: 'piorx/change-spec@1',
         source_artifact_id: spec.artifact_id,
         new_user_intent_verbatim: 'Add token rotation',
       },
       store,
     );
 
-    const intent = await store.get('recursive-intent-v1', result.recursive_intent_id!);
+    const intent = await store.get('piorx/recursive-intent@1', result.recursive_intent_id!);
     const validation = validateArtifact(intent);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
@@ -189,7 +189,7 @@ describe('artifact promotion to recursive intent', () => {
   it('rejects non-promotable artifact types', async () => {
     const result = await artifactPromote(
       {
-        source_artifact_type: 'intent-capture-v1',
+        source_artifact_type: 'piorx/intent-capture@1',
         source_artifact_id: 'intent_001',
         new_user_intent_verbatim: 'Try to promote an intent',
       },
@@ -207,7 +207,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: '',
       },
@@ -225,7 +225,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: '   ',
       },
@@ -239,7 +239,7 @@ describe('artifact promotion to recursive intent', () => {
   it('errors when source artifact does not exist', async () => {
     const result = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: 'nonexistent_001',
         new_user_intent_verbatim: 'Follow up on missing report',
       },
@@ -257,7 +257,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result1 = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'First follow-up',
       },
@@ -266,7 +266,7 @@ describe('artifact promotion to recursive intent', () => {
 
     const result2 = await artifactPromote(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Second follow-up',
       },
@@ -282,14 +282,14 @@ describe('artifact promotion to recursive intent', () => {
 
     const result = await artifactPromote(
       {
-        source_artifact_type: 'change-spec-v1',
+        source_artifact_type: 'piorx/change-spec@1',
         source_artifact_id: spec.artifact_id,
         new_user_intent_verbatim: 'Extend the change spec',
       },
       store,
     );
 
-    const allIntents = await store.listByType('recursive-intent-v1');
+    const allIntents = await store.listByType('piorx/recursive-intent@1');
     expect(allIntents.length).toBeGreaterThanOrEqual(1);
     expect(allIntents.some((i) => i.artifact_id === result.recursive_intent_id)).toBe(true);
   });

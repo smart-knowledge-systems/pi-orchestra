@@ -84,7 +84,7 @@ async function setupRepoFiles() {
 
 function makeIndex(): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_test',
     intent_capture_id: 'ic_test',
     intent_restatement_id: 'ir_test',
@@ -194,10 +194,10 @@ function makeIndex(): RetrievalIndexV1 {
 
 function makePlan(index: RetrievalIndexV1, overrides?: Partial<EvidencePlanV1>): EvidencePlanV1 {
   return {
-    artifact_type: 'evidence-plan-v1',
+    artifact_type: 'piorx/evidence-plan@1',
     artifact_id: 'plan_test',
     retrieval_index: {
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: index.artifact_id,
     },
     selection: {
@@ -235,7 +235,7 @@ function makePlan(index: RetrievalIndexV1, overrides?: Partial<EvidencePlanV1>):
 
 async function seedArtifacts(index: RetrievalIndexV1, plan: EvidencePlanV1) {
   const capture: IntentCaptureV1 = {
-    artifact_type: 'intent-capture-v1',
+    artifact_type: 'piorx/intent-capture@1',
     artifact_id: 'ic_test',
     user_intent_verbatim: 'I want to understand server startup.',
     cleaned_user_intent: 'I want to understand server startup.',
@@ -243,7 +243,7 @@ async function seedArtifacts(index: RetrievalIndexV1, plan: EvidencePlanV1) {
     timestamp: '2026-04-09T00:00:00Z',
   };
   const restatement: IntentRestatementV1 = {
-    artifact_type: 'intent-restatement-v1',
+    artifact_type: 'piorx/intent-restatement@1',
     artifact_id: 'ir_test',
     intent_capture_id: 'ic_test',
     user_intent_verbatim: 'I want to understand server startup.',
@@ -281,7 +281,7 @@ describe('evidence assembler — materialize mode', () => {
     expect(result.status).toBe('success');
     expect(result.evidence_bundle_id).toBeTruthy();
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle).not.toBeNull();
     const validation = validateArtifact(bundle!);
     expect(validation.valid).toBe(true);
@@ -311,8 +311,8 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const b1 = await store.get('evidence-bundle-v1', r1.evidence_bundle_id!);
-    const b2 = await store.get('evidence-bundle-v1', r2.evidence_bundle_id!);
+    const b1 = await store.get('piorx/evidence-bundle@1', r1.evidence_bundle_id!);
+    const b2 = await store.get('piorx/evidence-bundle@1', r2.evidence_bundle_id!);
 
     // Compare everything except artifact_id (which is unique per call)
     const normalize = (b: EvidenceBundleV1) => {
@@ -337,7 +337,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.intent_context.user_intent_verbatim).toBe(
       'I want to understand server startup.',
     );
@@ -362,7 +362,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     const f1Struct = bundle!.structural_context.files[0]!;
     expect(f1Struct.ast_skeleton).toEqual(['function main()', 'function helper()']);
   });
@@ -382,7 +382,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.structural_context.files[0]!.file_summary).toBe('Main application entry point');
   });
 
@@ -401,7 +401,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.raw_evidence.length).toBeGreaterThan(0);
     const span = bundle!.raw_evidence[0]!;
     expect(span.kind).toBe('span');
@@ -424,7 +424,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.structural_context.cross_file_findings).toEqual(['main imports init module']);
   });
 
@@ -448,7 +448,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.structural_context.cross_file_findings).toEqual([]);
   });
 
@@ -536,7 +536,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     // Only f1 should be in structural context (plan only lists f1)
     expect(bundle!.structural_context.files).toHaveLength(1);
     expect(bundle!.structural_context.files[0]!.path).toContain('main.ts');
@@ -578,7 +578,7 @@ describe('evidence assembler — materialize mode', () => {
     )) as EvidenceMaterializeResult;
 
     expect(result.status).toBe('success');
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.raw_evidence).toHaveLength(1);
     expect(bundle!.raw_evidence[0]!.kind).toBe('full_file');
     expect(bundle!.raw_evidence[0]!.content).toContain('formatDate');
@@ -613,7 +613,7 @@ describe('evidence assembler — materialize mode', () => {
     await setupRepoFiles();
     const index = makeIndex();
     const plan = makePlan(index, {
-      retrieval_index: { artifact_type: 'retrieval-index-v1', artifact_id: 'ri_wrong' },
+      retrieval_index: { artifact_type: 'piorx/retrieval-index@1', artifact_id: 'ri_wrong' },
     });
     await store.put(index);
     await store.put(plan);
@@ -646,7 +646,7 @@ describe('evidence assembler — materialize mode', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.stats.files).toBe(1);
     expect(bundle!.stats.spans).toBeGreaterThan(0);
     expect(bundle!.stats.full_files).toBe(0);
@@ -692,7 +692,7 @@ describe('evidence assembler — materialize mode', () => {
     )) as EvidenceMaterializeResult;
 
     expect(result.status).toBe('success');
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle).not.toBeNull();
     // Reserve file must not appear in the materialized bundle.
     expect(bundle!.structural_context.files).toHaveLength(1);
@@ -770,10 +770,13 @@ describe('evidence assembler — materialize mode', () => {
     expect(legacyResult.status).toBe('success');
 
     const recommendedBundle = await store.get(
-      'evidence-bundle-v1',
+      'piorx/evidence-bundle@1',
       recommendedResult.evidence_bundle_id!,
     );
-    const legacyBundle = await store.get('evidence-bundle-v1', legacyResult.evidence_bundle_id!);
+    const legacyBundle = await store.get(
+      'piorx/evidence-bundle@1',
+      legacyResult.evidence_bundle_id!,
+    );
     expect(recommendedBundle!.structural_context.files.length).toBeLessThan(
       legacyBundle!.structural_context.files.length,
     );
@@ -825,7 +828,7 @@ describe('evidence assembler — override semantics regression', () => {
     )) as EvidenceMaterializeResult;
 
     expect(result.status).toBe('success');
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.raw_evidence.filter((e) => e.kind === 'span')).toHaveLength(0);
     expect(bundle!.raw_evidence).toHaveLength(0);
     expect(bundle!.stats.spans).toBe(0);
@@ -879,7 +882,7 @@ describe('evidence assembler — override semantics regression', () => {
     )) as EvidenceMaterializeResult;
 
     expect(result.status).toBe('success');
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     const paths = bundle!.structural_context.files.map((f) => f.path);
     for (const p of paths) {
       expect(p).not.toContain('main.ts');
@@ -925,7 +928,7 @@ describe('evidence assembler — override semantics regression', () => {
     )) as EvidenceMaterializeResult;
 
     expect(result.status).toBe('success');
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     const utilsSpans = bundle!.raw_evidence.filter(
       (e) => e.kind === 'span' && e.path.includes('utils.ts'),
     );

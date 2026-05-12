@@ -101,7 +101,7 @@ describe('normalizeRetrievalOutput', () => {
 
     const validation = validateArtifact(result.artifact);
     expect(validation.valid).toBe(true);
-    expect(result.artifact.artifact_type).toBe('retrieval-index-v1');
+    expect(result.artifact.artifact_type).toBe('piorx/retrieval-index@1');
   });
 
   test('converts relative paths to absolute paths', () => {
@@ -480,8 +480,8 @@ describe('retrievalDispatch integration', () => {
   test('creates stored retrieval-index-v1 from approved intent', async () => {
     // Set up prerequisite artifacts
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
-      artifact_id: generateArtifactId('intent-capture-v1'),
+      artifact_type: 'piorx/intent-capture@1',
+      artifact_id: generateArtifactId('piorx/intent-capture@1'),
       user_intent_verbatim: 'How does the request handler work?',
       cleaned_user_intent: 'How does the request handler work?',
       tagged_files: [],
@@ -490,8 +490,8 @@ describe('retrievalDispatch integration', () => {
     await store.put(capture);
 
     const restatement: IntentRestatementV1 = {
-      artifact_type: 'intent-restatement-v1',
-      artifact_id: generateArtifactId('intent-restatement-v1'),
+      artifact_type: 'piorx/intent-restatement@1',
+      artifact_id: generateArtifactId('piorx/intent-restatement@1'),
       intent_capture_id: capture.artifact_id,
       user_intent_verbatim: capture.user_intent_verbatim,
       restated_intent: 'Understand the request handler implementation',
@@ -516,9 +516,9 @@ describe('retrievalDispatch integration', () => {
     expect(result.retrieval_index_id).not.toBeNull();
 
     // Verify the stored artifact
-    const stored = await store.get('retrieval-index-v1', result.retrieval_index_id!);
+    const stored = await store.get('piorx/retrieval-index@1', result.retrieval_index_id!);
     expect(stored).not.toBeNull();
-    expect(stored!.artifact_type).toBe('retrieval-index-v1');
+    expect(stored!.artifact_type).toBe('piorx/retrieval-index@1');
     expect(stored!.intent_capture_id).toBe(capture.artifact_id);
     expect(stored!.intent_restatement_id).toBe(restatement.artifact_id);
 
@@ -570,8 +570,8 @@ describe('retrievalDispatch integration', () => {
     // Add a tagged file so we can assert the scout-driven boost ended up in
     // the stored artifact (pure dispatch-level evidence the scout ran).
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
-      artifact_id: generateArtifactId('intent-capture-v1'),
+      artifact_type: 'piorx/intent-capture@1',
+      artifact_id: generateArtifactId('piorx/intent-capture@1'),
       user_intent_verbatim: 'Investigate handler.ts',
       cleaned_user_intent: 'Investigate handler.ts',
       tagged_files: ['src/handler.ts'],
@@ -579,8 +579,8 @@ describe('retrievalDispatch integration', () => {
     };
     await store.put(capture);
     const restatement: IntentRestatementV1 = {
-      artifact_type: 'intent-restatement-v1',
-      artifact_id: generateArtifactId('intent-restatement-v1'),
+      artifact_type: 'piorx/intent-restatement@1',
+      artifact_id: generateArtifactId('piorx/intent-restatement@1'),
       intent_capture_id: capture.artifact_id,
       user_intent_verbatim: capture.user_intent_verbatim,
       restated_intent: 'Understand the request handler implementation',
@@ -600,7 +600,7 @@ describe('retrievalDispatch integration', () => {
       config,
     );
     expect(result.status).toBe('success');
-    const stored = await store.get('retrieval-index-v1', result.retrieval_index_id!);
+    const stored = await store.get('piorx/retrieval-index@1', result.retrieval_index_id!);
     expect(stored).not.toBeNull();
 
     // scout_terms should carry at least one term drawn from the tagged file
@@ -631,8 +631,8 @@ describe('retrievalDispatch integration', () => {
 
   test('returns error when restatement is missing', async () => {
     const capture: IntentCaptureV1 = {
-      artifact_type: 'intent-capture-v1',
-      artifact_id: generateArtifactId('intent-capture-v1'),
+      artifact_type: 'piorx/intent-capture@1',
+      artifact_id: generateArtifactId('piorx/intent-capture@1'),
       user_intent_verbatim: 'test',
       cleaned_user_intent: 'test',
       tagged_files: [],

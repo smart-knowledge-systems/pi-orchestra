@@ -18,6 +18,14 @@
  * - `set_file_mode` with `summary` or `summary+ast` clears stale span
  *   selections on the plan file so flag changes stay in sync with emitted
  *   evidence, and `exclude` removes the file from `selection.files` entirely.
+ *
+ * COMP-P1-T10 promotes the `EvidenceOverride` discriminated union to the
+ * first concrete `GateOp` (`src/runtime/gate.ts`) and exports
+ * `evidenceReviewGate: GateSpec<EvidenceOverride>` — the canonical reference
+ * implementation of a piorx gate. The semantic batch-apply behavior is
+ * unchanged; the gate exposes the same logic per-op for the runtime
+ * executor's gate broker (`src/runtime/workflow-executor.ts`) and runs
+ * after the `evidence` stage when registered against a `WorkflowRegistry`.
  */
 
 import type {
@@ -30,6 +38,8 @@ import type {
   RetrievalDefaultEvidenceMode,
 } from '../artifacts/types.ts';
 import { generateArtifactId } from '../artifacts/ids.ts';
+import type { GateOp, GateOpValidation, GatePresentation, GateSpec } from '../runtime/gate.ts';
+import type { StageContext } from '../runtime/stage.ts';
 
 // ---------------------------------------------------------------------------
 // Effective mode derivation
@@ -450,8 +460,150 @@ export function applyEvidenceOverrides(
   return {
     plan: {
       ...working,
-      artifact_id: generateArtifactId('evidence-plan-v1'),
+      artifact_id: generateArtifactId('piorx/evidence-plan@1'),
     },
     applied,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Gate primitive — evidence.review
+// ---------------------------------------------------------------------------
+//
+// Per `docs/composability.md` "Phase 1 — Scaffolding" and COMP-P1-T10, the
+// `EvidenceOverride` discriminated union is the first concrete `GateOp`
+// implementation. Each member of the union already carries the `op`
+// discriminator that `GateOp` requires, so the type satisfies the interface
+// without any structural change:
+//
+//     type EvidenceOverride = { op: 'promote_file'; ... } | ...;
+//     // structurally compatible with `GateOp` from `src/runtime/gate.ts`.
+//
+// `EvidenceOverride satisfies GateOp` is checked at compile-time below to
+// surface drift if a future override member loses its `op` discriminator.
+//
+// `evidenceReviewGate` registers against the `evidence` stage id via
+// `WorkflowRegistry.registerGate('evidence', evidenceReviewGate)`. The
+// executor (`src/runtime/workflow-executor.ts`) walks gates in registration
+// order after each stage; the broker drives the user-facing review surface
+// produced by `presents()`, validates proposed ops via `validateOverride`,
+// and applies accepted ops via `applyOverride`.
+//
+// The gate's `applyOverride` deliberately wraps the existing batch-apply
+// logic: it loads the current plan + retrieval-index from the store, calls
+// `applyEvidenceOverrides({ plan, retrieval_index, overrides: [op] })`, and
+// persists the resulting plan with a fresh artifact_id. The session-state
+// `evidence_plan_id` slot update is the broker's responsibility — the
+// `GateSpec` contract returns `void`, so the broker observes the new plan
+// id through the store after `applyOverride` resolves.
+
+// Compile-time conformance check: `EvidenceOverride` is a `GateOp`. If a
+// future union member drops the `op` discriminator the type-check fails
+// loudly at this line rather than silently breaking gate composition.
+const _evidenceOverrideIsGateOp: GateOp = null as unknown as EvidenceOverride;
+void _evidenceOverrideIsGateOp;
+
+/**
+ * Re-export `EvidenceOverride` as the canonical alias used by extension
+ * authors who consume the gate primitive. The shape is unchanged — this is
+ * a documentation handle for "this union is the first concrete `GateOp`."
+ */
+export type EvidenceReviewOp = EvidenceOverride;
+
+/**
+ * `evidence.review` — the canonical reference `GateSpec`.
+ *
+ * Registered against the `evidence` stage id; runs after the deterministic
+ * evidence assembler produces an evidence-bundle from the retriever-
+ * authored default plan. Composes through `WorkflowRegistry.registerGate`
+ * and is invoked by the runtime executor in registration order.
+ */
+export const evidenceReviewGate: GateSpec<EvidenceOverride> = {
+  id: 'evidence.review',
+
+  async presents(ctx: StageContext): Promise<GatePresentation> {
+    const planId = ctx.session.artifacts.evidence_plan_id;
+    if (!planId) {
+      return {
+        summary: 'evidence.review: no evidence-plan in session — nothing to review yet.',
+      };
+    }
+    const plan = await ctx.store.get('piorx/evidence-plan@1', planId);
+    const indexId = ctx.session.artifacts.retrieval_index_id;
+    const index = indexId ? await ctx.store.get('piorx/retrieval-index@1', indexId) : null;
+
+    const fileCount = plan?.selection.files.length ?? 0;
+    const spanCount =
+      plan?.selection.files.reduce(
+        (total, file) => total + file.spans.filter((s) => s.include_span).length,
+        0,
+      ) ?? 0;
+
+    return {
+      summary: `evidence-plan ${planId}: ${fileCount} files, ${spanCount} selected spans`,
+      details: {
+        plan,
+        retrieval_index: index,
+      },
+    };
+  },
+
+  validateOverride(op: EvidenceOverride, ctx: StageContext): GateOpValidation {
+    const errors: string[] = [];
+
+    // The three toggle ops do not reference a file; they are valid only
+    // because `applyOverride` still requires a retrieval-index in session,
+    // so we mirror that requirement here. Validation must not pass an op
+    // that apply will throw on — the gate would otherwise accept then
+    // crash at runtime.
+    const isToggle =
+      op.op === 'toggle_cross_file_findings' ||
+      op.op === 'toggle_gaps' ||
+      op.op === 'toggle_followup_queries';
+
+    if (!ctx.session.artifacts.evidence_plan_id) {
+      errors.push('evidence.review: no evidence-plan in session to apply override against');
+    }
+    if (!ctx.session.artifacts.retrieval_index_id) {
+      errors.push('evidence.review: no retrieval-index in session to validate override against');
+    }
+    if (!isToggle) {
+      if (!('file_id' in op) || typeof op.file_id !== 'string' || op.file_id.length === 0) {
+        errors.push('evidence.review: override is missing required file_id');
+      }
+    }
+    return { valid: errors.length === 0, errors };
+  },
+
+  async applyOverride(op: EvidenceOverride, ctx: StageContext): Promise<void> {
+    const planId = ctx.session.artifacts.evidence_plan_id;
+    const indexId = ctx.session.artifacts.retrieval_index_id;
+    if (!planId || !indexId) {
+      throw new Error(
+        'evidence.review.applyOverride: requires evidence_plan_id and retrieval_index_id in session',
+      );
+    }
+    const plan = await ctx.store.get('piorx/evidence-plan@1', planId);
+    const index = await ctx.store.get('piorx/retrieval-index@1', indexId);
+    if (!plan) {
+      throw new Error(
+        `evidence.review.applyOverride: failed to load evidence-plan "${planId}" from store`,
+      );
+    }
+    if (!index) {
+      throw new Error(
+        `evidence.review.applyOverride: failed to load retrieval-index "${indexId}" from store`,
+      );
+    }
+    const result = applyEvidenceOverrides({
+      plan,
+      retrieval_index: index,
+      overrides: [op],
+    });
+    await ctx.store.put(result.plan);
+    // Note: the session-state `evidence_plan_id` slot update is the broker's
+    // responsibility (the GateSpec contract returns `void`). The broker
+    // observes the new plan id through the store after `applyOverride`
+    // resolves and pivots the slot through its session-state mutator.
+  },
+};

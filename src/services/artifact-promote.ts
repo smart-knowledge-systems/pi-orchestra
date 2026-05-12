@@ -30,7 +30,7 @@ export interface ArtifactPromoteResult {
 // Allowed source types for promotion
 // ---------------------------------------------------------------------------
 
-const PROMOTABLE_TYPES = ['analysis-report-v1', 'change-spec-v1'] as const;
+const PROMOTABLE_TYPES = ['piorx/analysis-report@1', 'piorx/change-spec@1'] as const;
 
 type PromotableType = (typeof PROMOTABLE_TYPES)[number];
 
@@ -51,7 +51,7 @@ export async function artifactPromote(
     return {
       status: 'error',
       recursive_intent_id: null,
-      message: `Cannot promote artifact type "${input.source_artifact_type}". Only analysis-report-v1 and change-spec-v1 are promotable.`,
+      message: `Cannot promote artifact type "${input.source_artifact_type}". Only piorx/analysis-report@1 and piorx/change-spec@1 are promotable.`,
     };
   }
 
@@ -78,9 +78,9 @@ export async function artifactPromote(
   }
 
   // Build recursive-intent-v1
-  const artifactId = generateArtifactId('recursive-intent-v1');
+  const artifactId = generateArtifactId('piorx/recursive-intent@1');
   const recursiveIntent: RecursiveIntentV1 = {
-    artifact_type: 'recursive-intent-v1',
+    artifact_type: 'piorx/recursive-intent@1',
     artifact_id: artifactId,
     source_artifact_type: input.source_artifact_type,
     source_artifact_id: input.source_artifact_id,

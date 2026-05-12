@@ -10,7 +10,7 @@ import type { EvidenceBundleV1 } from '../../src/artifacts/types.ts';
 // ---------------------------------------------------------------------------
 
 const FIXTURE_BUNDLE: EvidenceBundleV1 = {
-  artifact_type: 'evidence-bundle-v1',
+  artifact_type: 'piorx/evidence-bundle@1',
   artifact_id: 'bundle_test_001',
   evidence_plan_id: 'plan_test_001',
   intent_context: {
@@ -187,7 +187,7 @@ describe('assembleSynthesisPrompt', () => {
       task_type: 'analysis-report',
     };
     const result = assembleSynthesisPrompt(FIXTURE_BUNDLE, opts);
-    expect(result.text).toContain('analysis-report-v1');
+    expect(result.text).toContain('piorx/analysis-report@1');
     expect(result.text).toContain('findings');
     expect(result.text).toContain('risks');
   });
@@ -199,7 +199,7 @@ describe('assembleSynthesisPrompt', () => {
       task_type: 'change-spec',
     };
     const result = assembleSynthesisPrompt(FIXTURE_BUNDLE, opts);
-    expect(result.text).toContain('change-spec-v1');
+    expect(result.text).toContain('piorx/change-spec@1');
     expect(result.text).toContain('edits');
     expect(result.text).toContain('acceptance_criteria');
   });

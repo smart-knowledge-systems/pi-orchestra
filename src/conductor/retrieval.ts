@@ -70,7 +70,7 @@ export async function inspectRetrievalResult(
   store: ArtifactStore,
   retrievalIndexId: string,
 ): Promise<RetrievalStageResult> {
-  const result = await artifactInspect(store, 'retrieval-index-v1', retrievalIndexId);
+  const result = await artifactInspect(store, 'piorx/retrieval-index@1', retrievalIndexId);
 
   if (!result.success) {
     return {

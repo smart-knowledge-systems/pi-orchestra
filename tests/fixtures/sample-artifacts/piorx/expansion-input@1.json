@@ -1,5 +1,5 @@
 {
-  "artifact_type": "expansion-input-v1",
+  "artifact_type": "piorx/expansion-input@1",
   "artifact_id": "expand_in_001",
   "intent_capture_id": "intent_001",
   "intent_restatement_id": "restatement_001",

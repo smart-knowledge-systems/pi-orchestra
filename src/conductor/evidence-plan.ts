@@ -190,10 +190,10 @@ export function createEvidencePlan(options: CreateEvidencePlanOptions): Evidence
   };
 
   return {
-    artifact_type: 'evidence-plan-v1',
-    artifact_id: generateArtifactId('evidence-plan-v1'),
+    artifact_type: 'piorx/evidence-plan@1',
+    artifact_id: generateArtifactId('piorx/evidence-plan@1'),
     retrieval_index: {
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: retrieval_index.artifact_id,
     },
     selection,
@@ -321,10 +321,10 @@ export function createRecommendedEvidencePlan(
   };
 
   return {
-    artifact_type: 'evidence-plan-v1',
-    artifact_id: generateArtifactId('evidence-plan-v1'),
+    artifact_type: 'piorx/evidence-plan@1',
+    artifact_id: generateArtifactId('piorx/evidence-plan@1'),
     retrieval_index: {
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: retrieval_index.artifact_id,
     },
     selection,

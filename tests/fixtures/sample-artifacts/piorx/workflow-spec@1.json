@@ -1,0 +1,65 @@
+{
+  "artifact_type": "piorx/workflow-spec@1",
+  "artifact_id": "workflow_default_sample",
+  "id": "piorx/workflow/default@1",
+  "name": "Default piorx workflow",
+  "description": "Sample fixture exercising the WorkflowSpecV1 structural validator.",
+  "goals": [
+    "Capture user intent verbatim and produce a canonical restatement",
+    "Build evidence narrowly from retriever-authored defaults",
+    "Synthesize either an analysis report or an executable change spec"
+  ],
+  "operating_mode": "supervised-change",
+  "mandatory_controls": ["intent.approval", "execution.allow_edits"],
+  "stages": [
+    {
+      "id": "restatement",
+      "name": "Stage 1 — Restatement",
+      "description": "Capture intent and produce a user-approved restatement.",
+      "inputs": ["piorx/intent-capture@1"],
+      "output": "piorx/intent-restatement@1",
+      "model_class": "deterministic",
+      "gates": ["intent.approval"]
+    },
+    {
+      "id": "synthesis",
+      "name": "Stage 5 — Synthesis",
+      "description": "Produce an analysis-report or change-spec artifact from the evidence bundle.",
+      "inputs": ["piorx/evidence-bundle@1", "piorx/intent-restatement@1"],
+      "output": "piorx/analysis-report@1 | piorx/change-spec@1",
+      "model_class": "llm-with-advisor",
+      "gates": ["synthesis.confirm-task-type"],
+      "control": {
+        "acceptance_criteria": "Output validates structurally AND contains at least one actionable element",
+        "failure_handling": "tentative"
+      }
+    },
+    {
+      "id": "execution",
+      "name": "Stage 6 — Execution",
+      "description": "Apply changes from the change-spec to the repository.",
+      "inputs": ["piorx/change-spec@1"],
+      "output": "piorx/execution-report@1",
+      "model_class": "deterministic",
+      "gates": ["execution.allow_edits"]
+    }
+  ],
+  "edges": [
+    {
+      "from": "restatement",
+      "to": "synthesis",
+      "description": "Restatement directly feeds synthesis in this minimal fixture."
+    },
+    {
+      "from": "synthesis",
+      "to": "execution",
+      "when": { "eq": ["$.synthesis.artifact_type", "piorx/change-spec@1"] },
+      "description": "Skip execution for analysis-only flows."
+    }
+  ],
+  "recursive_promotion_target": "restatement",
+  "governance": {
+    "evidence_requirements": ["advisor-consultations", "override-history", "source-access-events"],
+    "version_pinning": "strict"
+  }
+}

@@ -75,7 +75,7 @@ export type InspectResult =
 // Blocked artifact types — conductor must not see raw content
 // ---------------------------------------------------------------------------
 
-const BLOCKED_TYPES: ReadonlySet<ArtifactType> = new Set(['evidence-bundle-v1']);
+const BLOCKED_TYPES: ReadonlySet<ArtifactType> = new Set(['piorx/evidence-bundle@1']);
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -152,8 +152,8 @@ export async function artifactInspect(
     };
   }
 
-  if (artifactType === 'retrieval-index-v1') {
-    const artifact = await store.get('retrieval-index-v1', artifactId);
+  if (artifactType === 'piorx/retrieval-index@1') {
+    const artifact = await store.get('piorx/retrieval-index@1', artifactId);
     if (!artifact) {
       return { success: false, error: `Artifact ${artifactId} not found` };
     }

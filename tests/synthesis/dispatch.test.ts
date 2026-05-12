@@ -39,7 +39,7 @@ afterEach(async () => {
 
 function makeBundle(): EvidenceBundleV1 {
   return {
-    artifact_type: 'evidence-bundle-v1',
+    artifact_type: 'piorx/evidence-bundle@1',
     artifact_id: 'bundle_synth_test_001',
     evidence_plan_id: 'plan_synth_test_001',
     intent_context: {
@@ -104,9 +104,9 @@ describe('synthesisDispatch', () => {
     expect(result.synthesis_artifact_id).not.toBeNull();
 
     // Verify stored artifact
-    const stored = await store.get('analysis-report-v1', result.synthesis_artifact_id!);
+    const stored = await store.get('piorx/analysis-report@1', result.synthesis_artifact_id!);
     expect(stored).not.toBeNull();
-    expect(stored!.artifact_type).toBe('analysis-report-v1');
+    expect(stored!.artifact_type).toBe('piorx/analysis-report@1');
     expect(stored!.evidence_bundle_id).toBe(bundle.artifact_id);
     expect(stored!.summary).toBeTruthy();
     expect(stored!.findings.length).toBeGreaterThan(0);
@@ -130,9 +130,9 @@ describe('synthesisDispatch', () => {
     expect(result.status).toBe('success');
     expect(result.synthesis_artifact_id).not.toBeNull();
 
-    const stored = await store.get('change-spec-v1', result.synthesis_artifact_id!);
+    const stored = await store.get('piorx/change-spec@1', result.synthesis_artifact_id!);
     expect(stored).not.toBeNull();
-    expect(stored!.artifact_type).toBe('change-spec-v1');
+    expect(stored!.artifact_type).toBe('piorx/change-spec@1');
     expect(stored!.evidence_bundle_id).toBe(bundle.artifact_id);
     expect(stored!.edits.length).toBeGreaterThan(0);
     expect(stored!.change_goal).toBeTruthy();
@@ -171,7 +171,7 @@ describe('synthesisDispatch', () => {
       store,
     );
 
-    const stored = await store.get('analysis-report-v1', result.synthesis_artifact_id!);
+    const stored = await store.get('piorx/analysis-report@1', result.synthesis_artifact_id!);
     const validation = validateArtifact(stored);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
@@ -193,7 +193,7 @@ describe('synthesisDispatch', () => {
       store,
     );
 
-    const stored = await store.get('change-spec-v1', result.synthesis_artifact_id!);
+    const stored = await store.get('piorx/change-spec@1', result.synthesis_artifact_id!);
     const validation = validateArtifact(stored);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
@@ -216,7 +216,7 @@ describe('synthesisDispatch', () => {
     );
 
     const stored = (await store.get(
-      'analysis-report-v1',
+      'piorx/analysis-report@1',
       result.synthesis_artifact_id!,
     )) as AnalysisReportV1;
     expect(stored.evidence_bundle_id).toBe(bundle.artifact_id);
@@ -239,7 +239,7 @@ describe('synthesisDispatch', () => {
     );
 
     const stored = (await store.get(
-      'change-spec-v1',
+      'piorx/change-spec@1',
       result.synthesis_artifact_id!,
     )) as ChangeSpecV1;
     const bundlePaths = bundle.raw_evidence.map((e) => e.path);

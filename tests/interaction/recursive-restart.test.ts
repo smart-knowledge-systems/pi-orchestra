@@ -16,6 +16,7 @@ import type {
   AnalysisReportV1,
   ChangeSpecV1,
   RecursiveIntentV1,
+  WorkflowSpecV1,
 } from '../../src/artifacts/types.ts';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@ afterEach(async () => {
 
 function makeAnalysisReport(): AnalysisReportV1 {
   return {
-    artifact_type: 'analysis-report-v1',
+    artifact_type: 'piorx/analysis-report@1',
     artifact_id: 'analysis_restart_001',
     evidence_bundle_id: 'bundle_restart_001',
     summary: 'Logging gaps in the ingest pipeline',
@@ -57,7 +58,7 @@ function makeAnalysisReport(): AnalysisReportV1 {
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_restart_001',
     evidence_bundle_id: 'bundle_restart_002',
     change_goal: 'Add structured logging',
@@ -103,7 +104,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Add structured logging as recommended',
       },
@@ -123,7 +124,7 @@ describe('session restart flow from promotion', () => {
     const verbatim = 'Instrument the batch processor with structured logging';
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: verbatim,
       },
@@ -132,7 +133,7 @@ describe('session restart flow from promotion', () => {
     );
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
@@ -150,7 +151,7 @@ describe('session restart flow from promotion', () => {
 
     await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up on analysis',
       },
@@ -172,7 +173,7 @@ describe('session restart flow from promotion', () => {
 
     await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Follow up',
       },
@@ -195,7 +196,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'change-spec-v1',
+        source_artifact_type: 'piorx/change-spec@1',
         source_artifact_id: spec.artifact_id,
         new_user_intent_verbatim: 'Also add metrics alongside logging',
       },
@@ -207,11 +208,11 @@ describe('session restart flow from promotion', () => {
     expect(machine.currentStage).toBe('idle');
 
     const intent = (await store.get(
-      'recursive-intent-v1',
+      'piorx/recursive-intent@1',
       result.recursive_intent_id!,
     )) as RecursiveIntentV1;
 
-    expect(intent.source_artifact_type).toBe('change-spec-v1');
+    expect(intent.source_artifact_type).toBe('piorx/change-spec@1');
     expect(intent.source_artifact_id).toBe(spec.artifact_id);
   });
 
@@ -220,7 +221,7 @@ describe('session restart flow from promotion', () => {
 
     const result = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: 'nonexistent_001',
         new_user_intent_verbatim: 'Follow up',
       },
@@ -242,7 +243,7 @@ describe('session restart flow from promotion', () => {
     // First restart
     const result1 = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'First follow-up',
       },
@@ -259,7 +260,7 @@ describe('session restart flow from promotion', () => {
 
     const result2 = await promoteAndRestart(
       {
-        source_artifact_type: 'analysis-report-v1',
+        source_artifact_type: 'piorx/analysis-report@1',
         source_artifact_id: report.artifact_id,
         new_user_intent_verbatim: 'Second follow-up',
       },
@@ -301,17 +302,120 @@ describe('canonical promotion prompt', () => {
 
 describe('canPromote', () => {
   it('returns true for analysis-report-v1', () => {
-    expect(canPromote('analysis-report-v1')).toBe(true);
+    expect(canPromote('piorx/analysis-report@1')).toBe(true);
   });
 
   it('returns true for change-spec-v1', () => {
-    expect(canPromote('change-spec-v1')).toBe(true);
+    expect(canPromote('piorx/change-spec@1')).toBe(true);
   });
 
   it('returns false for other types', () => {
-    expect(canPromote('intent-capture-v1')).toBe(false);
-    expect(canPromote('evidence-bundle-v1')).toBe(false);
-    expect(canPromote('execution-report-v1')).toBe(false);
-    expect(canPromote('recursive-intent-v1')).toBe(false);
+    expect(canPromote('piorx/intent-capture@1')).toBe(false);
+    expect(canPromote('piorx/evidence-bundle@1')).toBe(false);
+    expect(canPromote('piorx/execution-report@1')).toBe(false);
+    expect(canPromote('piorx/recursive-intent@1')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: spec-driven recursive promotion target (COMP-P6-T1)
+// ---------------------------------------------------------------------------
+
+function makeWorkflowSpec(overrides: Partial<WorkflowSpecV1> = {}): WorkflowSpecV1 {
+  return {
+    artifact_type: 'piorx/workflow-spec@1',
+    artifact_id: 'workflow_spec_test_001',
+    id: 'piorx/workflow/test@1',
+    name: 'Test workflow',
+    description: 'Synthetic spec for recursive-promotion-target tests.',
+    goals: ['exercise the spec-driven recursive promotion target'],
+    operating_mode: 'advisory',
+    mandatory_controls: [],
+    stages: [
+      {
+        id: 'restatement',
+        name: 'Stage 1 — Restatement',
+        description: 'Capture and restate intent.',
+        inputs: ['piorx/intent-capture@1'],
+        output: 'piorx/intent-restatement@1',
+        model_class: 'llm',
+      },
+      {
+        id: 'expansion',
+        name: 'Stage 2 — Expansion',
+        description: 'Expand the restatement into a structured spec.',
+        inputs: ['piorx/intent-restatement@1'],
+        output: 'piorx/intent-spec@1',
+        model_class: 'llm',
+      },
+    ],
+    edges: [
+      {
+        from: 'restatement',
+        to: 'expansion',
+        description: 'Restatement always flows into expansion.',
+      },
+    ],
+    recursive_promotion_target: 'restatement',
+    ...overrides,
+  };
+}
+
+describe('spec-driven recursive promotion target', () => {
+  it('default workflow exposes recursive_promotion_target=restatement on the machine', async () => {
+    expect(machine.recursivePromotionTarget).toBe('restatement');
+  });
+
+  it('default workflow promotion message references the spec target', async () => {
+    const report = makeAnalysisReport();
+    await store.put(report);
+    await advanceToSynthesis(machine);
+
+    const result = await promoteAndRestart(
+      {
+        source_artifact_type: 'piorx/analysis-report@1',
+        source_artifact_id: report.artifact_id,
+        new_user_intent_verbatim: 'Follow up',
+      },
+      store,
+      machine,
+    );
+
+    expect(result.status).toBe('success');
+    expect(result.message).toContain('restatement');
+  });
+
+  it('an alternative workflow with a different target is exercisable end-to-end', async () => {
+    const altSpec = makeWorkflowSpec({
+      id: 'piorx/workflow/alt-target@1',
+      recursive_promotion_target: 'expansion',
+    });
+    const altMachine = await StageMachine.init(config, { workflowSpec: altSpec });
+
+    expect(altMachine.recursivePromotionTarget).toBe('expansion');
+
+    const report = makeAnalysisReport();
+    await store.put(report);
+
+    // Walk the alt spec's two-stage flow up to expansion (the terminal
+    // stage in this synthetic spec) so the `transition('idle', ...)`
+    // inside promoteAndRestart is legal under the alt spec's edge list.
+    await altMachine.transition('restatement', 'intent_alt_001');
+    await altMachine.transition('expansion', 'restate_alt_001');
+
+    const result = await promoteAndRestart(
+      {
+        source_artifact_type: 'piorx/analysis-report@1',
+        source_artifact_id: report.artifact_id,
+        new_user_intent_verbatim: 'Follow up against an alternative target',
+      },
+      store,
+      altMachine,
+    );
+
+    expect(result.status).toBe('success');
+    expect(altMachine.currentStage).toBe('idle');
+    expect(result.message).toContain('expansion');
+    expect(result.message).not.toContain('Stage 1');
   });
 });

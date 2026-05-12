@@ -15,7 +15,7 @@ import type { RetrievalIndexV1 } from '../../src/artifacts/types.ts';
 
 function makeIndex(): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_override_123',
     intent_capture_id: 'ic_1',
     intent_restatement_id: 'ir_1',

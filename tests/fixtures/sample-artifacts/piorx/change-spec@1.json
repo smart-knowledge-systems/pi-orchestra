@@ -1,5 +1,5 @@
 {
-  "artifact_type": "change-spec-v1",
+  "artifact_type": "piorx/change-spec@1",
   "artifact_id": "change_001",
   "evidence_bundle_id": "bundle_001",
   "change_goal": "Preserve valid custom model ids during session restore when provider auth exists",

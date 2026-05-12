@@ -1,52 +1,41 @@
 /**
  * Conductor extension entrypoint.
  *
- * Bootstraps the pi-orchestra runtime and wires the full staged conductor flow:
- * Stage 1 restatement -> Stage 2 expansion -> Stage 3 retrieval ->
- * Stage 4 evidence -> Stage 5 synthesis -> Stage 6 execution ->
- * optional recursive restart.
+ * Bootstraps the pi-orchestra runtime and routes user intent into the
+ * default workflow runner (`src/conductor/default-pipeline.ts`). The
+ * extension is intentionally thin: per `docs/composability.md` "Phase 1 —
+ * Refactor", the inline six-stage pipeline that lived here previously has
+ * been replaced by a single call into the workflow executor over the
+ * loaded `piorx/workflow/default@1` spec. Per-stage UI flows live on the
+ * stage adapters; orchestration follows the spec's edges.
  *
- * The conductor itself still does not read raw repo files directly. Raw file access,
- * when needed, happens inside deterministic runtime services such as retrieval and
- * evidence assembly.
+ * The conductor still does not read raw repo files directly. Raw file
+ * access, when needed, happens inside deterministic runtime services such
+ * as retrieval and evidence assembly.
  */
 
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { complete, type UserMessage } from '@mariozechner/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { ArtifactStore } from '../src/artifacts/store.ts';
-import type {
-  AnalysisReportV1,
-  ChangeSpecV1,
-  ExpandedSpec,
-  IntentCaptureV1,
-  IntentRestatementV1,
-  RetrievalIndexV1,
-} from '../src/artifacts/types.ts';
-import { createRecommendedEvidencePlan } from '../src/conductor/evidence-plan.ts';
-import {
-  applyEvidenceOverrides,
-  deriveEffectiveFileMode,
-  type EvidenceOverride,
-} from '../src/conductor/evidence-overrides.ts';
-import { ExpansionController, type ExpansionReviewResponse } from '../src/conductor/expansion.ts';
-import {
-  getPromotionPrompt,
-  promoteAndRestart,
-  type PromotionResult,
-} from '../src/conductor/recursive-intent.ts';
-import { canStartRetrieval, inspectRetrievalResult } from '../src/conductor/retrieval.ts';
-import { Stage1Controller, type RestateInput } from '../src/conductor/stage-1.ts';
-import { CONDUCTOR_SYSTEM_PREAMBLE, RESTATEMENT_INSTRUCTION } from '../src/conductor/prompts.ts';
+import { runDefaultPipeline } from '../src/conductor/default-pipeline.ts';
 import { StageMachine } from '../src/conductor/stage-machine.ts';
-import { createConfig, type PiOrchestraConfig } from '../src/runtime/config.ts';
-import { buildRestatementContext, toIntentFileRefs } from '../src/util/intent-files.ts';
-import { evidenceAssemble } from '../src/services/evidence-assembler.ts';
-import { executionDispatch } from '../src/services/execution-dispatch.ts';
-import { retrievalDispatch } from '../src/services/retrieval-dispatch.ts';
+import {
+  createConfig,
+  resolvePhaseModelConfig,
+  type PhaseExecutor,
+  type PiOrchestraConfig,
+  type PipelinePhaseId,
+} from '../src/runtime/config.ts';
+import {
+  runAdvisorTool,
+  type AdvisorCallback,
+  type AdvisorToolDetails,
+  type AdvisorToolResult,
+} from '../src/runtime/run-with-advisor.ts';
 import type { AgentModelCallback } from '../src/retriever/agent-types.ts';
-import { synthesisDispatch, type SynthesisTaskType } from '../src/services/synthesis-dispatch.ts';
 
 type OrchestraRuntime = {
   config: PiOrchestraConfig;
@@ -83,14 +72,76 @@ async function getMachine(): Promise<StageMachine> {
   return runtime.machineReady;
 }
 
-async function getModelText(systemPrompt: string, userText: string, ctx: ExtensionContext) {
+/**
+ * Tracks which phases have already received a `ctx.model` deprecation
+ * warning so the log is informative once per process lifetime per phase
+ * rather than on every model call.
+ */
+const ctxModelDeprecationWarned = new Set<string>();
+
+/**
+ * Resolve the executor `Model<Api>` for the given phase.
+ *
+ * Per `docs/composability.md` "Phase 2 — `getModelText` takes a phase
+ * parameter", we look up `runtime.config.models[phase].executor` first.
+ * When no per-phase executor is configured (or the phase is omitted), we
+ * fall back to `ctx.model` and emit a deprecation warning the first time
+ * each phase trips the fallback path. The fallback is documented as
+ * intentionally surviving "one minor version" so existing hosts keep
+ * working while they migrate to per-phase configuration.
+ */
+type ResolvedModel = NonNullable<ExtensionContext['model']>;
+
+function resolveExecutorModel(
+  ctx: ExtensionContext,
+  phase: PipelinePhaseId | string | undefined,
+): ResolvedModel {
+  if (phase) {
+    const phaseConfig = resolvePhaseModelConfig(runtime.config, phase as PipelinePhaseId);
+    const executor: PhaseExecutor | undefined = phaseConfig?.executor;
+    if (executor) {
+      const found = ctx.modelRegistry.find(executor.provider, executor.model);
+      if (found) return found;
+      throw new Error(
+        `Conductor model call: phase "${phase}" requested executor ` +
+          `${executor.provider}/${executor.model} but the model registry does not know it`,
+      );
+    }
+  }
+
   if (!ctx.model) {
     throw new Error('No model selected for conductor model call');
   }
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+  const fallbackKey = phase ?? '__no_phase__';
+  if (!ctxModelDeprecationWarned.has(fallbackKey)) {
+    ctxModelDeprecationWarned.add(fallbackKey);
+    const detail = phase
+      ? `phase "${phase}" has no models[${phase}].executor entry`
+      : 'caller did not pass a phase id';
+    void logEvent('runtime.ctx_model_deprecated', {
+      phase: phase ?? null,
+      detail,
+      message:
+        `[piorx] ctx.model fallback used for ${detail}; ` +
+        `populate runtime.config.models[<phase>].executor (Phase 2). ` +
+        `This fallback survives one minor version per docs/composability.md.`,
+    });
+  }
+  return ctx.model;
+}
+
+async function getModelText(
+  systemPrompt: string,
+  userText: string,
+  ctx: ExtensionContext,
+  phase?: PipelinePhaseId | string,
+) {
+  const model = resolveExecutorModel(ctx, phase);
+
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok || !auth.apiKey) {
-    throw new Error(auth.ok ? `No API key for ${ctx.model.provider}` : auth.error);
+    throw new Error(auth.ok ? `No API key for ${model.provider}` : auth.error);
   }
 
   const userMessage: UserMessage = {
@@ -100,7 +151,7 @@ async function getModelText(systemPrompt: string, userText: string, ctx: Extensi
   };
 
   const response = await complete(
-    ctx.model,
+    model,
     {
       systemPrompt,
       messages: [userMessage],
@@ -129,912 +180,203 @@ async function getModelText(systemPrompt: string, userText: string, ctx: Extensi
   return text;
 }
 
-function stripCodeFence(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('```')) {
-    return trimmed;
-  }
-  return trimmed
-    .replace(/^```(?:json)?\s*/u, '')
-    .replace(/\s*```$/u, '')
-    .trim();
-}
-
-function coerceStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.map((item) => String(item).trim()).filter((item) => item.length > 0)
-    : [];
-}
-
-function extractJsonObject(text: string): string | null {
-  const stripped = stripCodeFence(text);
-  const firstBrace = stripped.indexOf('{');
-  const lastBrace = stripped.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    return null;
-  }
-  return stripped.slice(firstBrace, lastBrace + 1);
-}
-
-function fallbackExpandedSpecFromText(
-  raw: string,
-  input: {
-    user_intent_verbatim: string;
-    approved_restated_intent: string;
-    included_files: Array<{ path: string; reason: string }>;
-  },
-): ExpandedSpec {
-  const lines = stripCodeFence(raw)
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const bulletValues = (prefixes: string[]): string[] => {
-    const values: string[] = [];
-    for (const line of lines) {
-      const normalized = line.toLowerCase();
-      if (prefixes.some((prefix) => normalized.startsWith(prefix))) {
-        const value = line.replace(/^[^:]+:\s*/, '').trim();
-        if (value) values.push(value);
-      } else if (/^[-*]\s+/.test(line)) {
-        values.push(line.replace(/^[-*]\s+/, '').trim());
-      }
-    }
-    return Array.from(new Set(values.filter(Boolean)));
-  };
-
-  const deliverables = bulletValues(['deliverable:', 'deliverables:']);
-  return {
-    objective: lines[0] ?? input.approved_restated_intent,
-    deliverables: deliverables.length > 0 ? deliverables : [input.approved_restated_intent],
-    constraints: bulletValues(['constraint:', 'constraints:']),
-    retrieval_focus: bulletValues(['retrieval focus:', 'focus:', 'retrieval:']),
-    open_questions: bulletValues(['open question:', 'open questions:', 'question:', 'questions:']),
-  };
-}
-
-function summarizeEvidencePreview(preview: {
-  estimated_lines: number | null;
-  estimated_tokens: number | null;
-  message: string;
-}) {
-  return [
-    'Evidence preview',
-    `Estimated lines: ${preview.estimated_lines ?? 'unknown'}`,
-    `Estimated tokens: ${preview.estimated_tokens ?? 'unknown'}`,
-    `Assembler note: ${preview.message}`,
-  ].join('\n');
-}
-
-function summarizeEvidencePlan(
-  plan: ReturnType<typeof createDefaultEvidencePlan>,
-  index: RetrievalIndexV1,
-) {
-  const reserveFiles = index.files.filter((f) => f.selection_tier === 'reserve');
-  const planFileIds = new Set(plan.selection.files.map((f) => f.file_id));
-  const fileSummaries = plan.selection.files.slice(0, 8).map((file) => {
-    const match = index.files.find((candidate) => candidate.file_id === file.file_id);
-    const effectiveMode = deriveEffectiveFileMode(file);
-    const retrievalMode = match?.default_evidence_mode;
-    const modeLabel =
-      retrievalMode && retrievalMode !== effectiveMode
-        ? `${effectiveMode} (retriever default: ${retrievalMode})`
-        : effectiveMode;
-    const includedSpans = file.spans.filter((s) => s.include_span).length;
-    const flags = [
-      file.include_entire_file ? 'whole' : null,
-      file.include_ast_skeleton ? 'ast' : null,
-      file.include_retriever_summary ? 'summary' : null,
-      includedSpans > 0 ? `spans=${includedSpans}` : null,
-    ]
-      .filter(Boolean)
-      .join(', ');
-    return `${match?.path ?? file.file_id} [${modeLabel}] — ${flags || 'exclude'}`;
-  });
-
-  const reserveLines = reserveFiles
-    .filter((f) => !planFileIds.has(f.file_id))
-    .slice(0, 5)
-    .map((f) => `${f.path} (${f.file_id}) — ${f.selection_reason || f.why_relevant}`);
-
-  return [
-    `Retriever-authored default plan (narrowed from ${index.files.length} retrieved, ${reserveFiles.length} held as reserve)`,
-    `Files in plan: ${plan.selection.files.length}`,
-    formatList('Selected files (in default plan)', fileSummaries, 8),
-    formatList('Reserve candidates (not in default plan)', reserveLines, 5),
-    `Include cross-file findings: ${plan.selection.include_cross_file_findings ? 'yes' : 'no'}`,
-    `Include gaps: ${plan.selection.include_gaps ? 'yes' : 'no'}`,
-    `Include follow-up queries: ${plan.selection.include_followup_queries ? 'yes' : 'no'}`,
-  ].join('\n\n');
-}
-
-const OVERRIDE_HELP = [
-  'Provide a JSON array of narrow override operations, or leave empty to keep retriever defaults.',
-  'Supported ops:',
-  '  { "op": "promote_file", "file_id": "...", "mode"?: "summary"|"summary+ast"|"spans"|"whole_file" }',
-  '    - mode="spans" only works when retrieval metadata has default spans for this file.',
-  '      Otherwise use mode="summary+ast" and follow with include_symbol operations.',
-  '  { "op": "demote_file", "file_id": "..." }',
-  '  { "op": "set_file_mode", "file_id": "...", "mode": "summary"|"summary+ast"|"spans"|"whole_file"|"exclude" }',
-  '    - mode="summary" / "summary+ast" clears any previously selected raw spans.',
-  '    - mode="exclude" removes the file from the plan entirely.',
-  '  { "op": "include_symbol", "file_id": "...", "symbol_id": "...", "neighbor_lines"?: 0 }',
-  '  { "op": "exclude_symbol", "file_id": "...", "symbol_id": "..." }',
-  '  { "op": "set_neighbor_lines", "file_id": "...", "symbol_id": "...", "neighbor_lines": 3 }',
-  '  { "op": "toggle_cross_file_findings"|"toggle_gaps"|"toggle_followup_queries", "value": true|false }',
-].join('\n');
-
-const VALID_OVERRIDE_OPS = new Set([
-  'promote_file',
-  'demote_file',
-  'set_file_mode',
-  'include_symbol',
-  'exclude_symbol',
-  'set_neighbor_lines',
-  'toggle_cross_file_findings',
-  'toggle_gaps',
-  'toggle_followup_queries',
-]);
-
-function parseEvidenceOverridesInput(raw: string): EvidenceOverride[] {
-  const stripped = stripCodeFence(raw).trim();
-  if (!stripped) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripped);
-  } catch (error) {
-    throw new Error(
-      `Override input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error('Override input must be a JSON array of operations');
-  }
-  return parsed.map((entry, idx) => {
-    if (!entry || typeof entry !== 'object') {
-      throw new Error(`Override #${idx}: must be an object`);
-    }
-    const op = (entry as { op?: unknown }).op;
-    if (typeof op !== 'string' || !VALID_OVERRIDE_OPS.has(op)) {
-      throw new Error(`Override #${idx}: unknown op "${String(op)}"`);
-    }
-    return entry as EvidenceOverride;
-  });
-}
-
-function parseExpandedSpec(
-  raw: string,
-  input: {
-    user_intent_verbatim: string;
-    approved_restated_intent: string;
-    included_files: Array<{ path: string; reason: string }>;
-  },
-): ParsedExpandedSpec {
-  const validationWarnings: string[] = [];
-  const jsonCandidate = extractJsonObject(raw);
-
-  if (jsonCandidate) {
-    try {
-      const parsed = JSON.parse(jsonCandidate) as Record<string, unknown>;
-      const objective =
-        typeof parsed.objective === 'string' && parsed.objective.trim().length > 0
-          ? parsed.objective.trim()
-          : input.approved_restated_intent;
-
-      if (typeof parsed.objective !== 'string' || parsed.objective.trim().length === 0) {
-        validationWarnings.push(
-          'Missing or invalid "objective"; defaulted to approved restated intent.',
-        );
-      }
-      if (!Array.isArray(parsed.deliverables)) {
-        validationWarnings.push(
-          'Missing or invalid "deliverables" array; coerced to [] or fallback value.',
-        );
-      }
-      if (!Array.isArray(parsed.constraints)) {
-        validationWarnings.push('Missing or invalid "constraints" array; coerced to [].');
-      }
-      if (!Array.isArray(parsed.retrieval_focus)) {
-        validationWarnings.push('Missing or invalid "retrieval_focus" array; coerced to [].');
-      }
-      if (!Array.isArray(parsed.open_questions)) {
-        validationWarnings.push('Missing or invalid "open_questions" array; coerced to [].');
-      }
-
-      return {
-        spec: {
-          objective,
-          deliverables: coerceStringArray(parsed.deliverables),
-          constraints: coerceStringArray(parsed.constraints),
-          retrieval_focus: coerceStringArray(parsed.retrieval_focus),
-          open_questions: coerceStringArray(parsed.open_questions),
-        },
-        usedFallback: false,
-        validationWarnings,
-      };
-    } catch (error) {
-      validationWarnings.push(
-        `Model returned malformed JSON for expansion; using fallback parser (${error instanceof Error ? error.message : String(error)}).`,
-      );
-    }
-  } else {
-    validationWarnings.push(
-      'Model did not return a JSON object for expansion; using fallback parser.',
-    );
-  }
-
-  return {
-    spec: fallbackExpandedSpecFromText(raw, input),
-    usedFallback: true,
-    validationWarnings,
-  };
-}
-
-function formatList(title: string, items: string[], maxItems = 5): string {
-  if (items.length === 0) return `${title}: none`;
-  const shown = items.slice(0, maxItems).map((item) => `  - ${item}`);
-  const remainder = items.length > maxItems ? [`  ... +${items.length - maxItems} more`] : [];
-  return [`${title}:`, ...shown, ...remainder].join('\n');
-}
-
-async function restateWithModel(input: RestateInput, ctx: ExtensionContext): Promise<string> {
-  const userText = input.contextBlock
-    ? `${input.cleanedIntent}\n\n${input.contextBlock}`
-    : input.cleanedIntent;
-  return getModelText(`${CONDUCTOR_SYSTEM_PREAMBLE}\n\n${RESTATEMENT_INSTRUCTION}`, userText, ctx);
-}
-
 /**
  * Model callback injected into the retriever agent loop. The callback lives
  * at the extension edge so `src/retriever/**` never imports pi host APIs.
+ *
+ * Pinned to `'retrieval'` per COMP-P2-T3 so the runtime resolves the
+ * configured retrieval executor (and emits the deprecation warning when no
+ * `models.retrieval.executor` is configured) instead of silently using
+ * `ctx.model`.
  */
 function makeRetrieverAgentModel(ctx: ExtensionContext): AgentModelCallback {
-  return async ({ systemPrompt, userPrompt }) => getModelText(systemPrompt, userPrompt, ctx);
+  return async ({ systemPrompt, userPrompt }) =>
+    getModelText(systemPrompt, userPrompt, ctx, 'retrieval');
 }
 
-type ParsedExpandedSpec = {
-  spec: ExpandedSpec;
-  usedFallback: boolean;
-  validationWarnings: string[];
-};
+/**
+ * Bridge from pi's `ExtensionContext.ui` to the slim `PipelineUI` shape the
+ * stage adapters consume. Keeps the pipeline runner free of pi host types
+ * while preserving the same UI semantics.
+ */
+function makePipelineUI(ctx: ExtensionContext) {
+  return {
+    confirm: (title: string, message: string) => ctx.ui.confirm(title, message),
+    input: (title: string, placeholder?: string) => ctx.ui.input(title, placeholder),
+    notify: (message: string, level: 'info' | 'warning' | 'error' = 'info') =>
+      ctx.ui.notify(message, level),
+    setStatus: (key: string, text: string | undefined) => ctx.ui.setStatus(key, text),
+  };
+}
 
-let lastExpansionParseMeta: ParsedExpandedSpec | null = null;
+// ---------------------------------------------------------------------------
+// piorx:advisor pi tool — wire-compat with rpiv-advisor (COMP-P5-T1)
+// ---------------------------------------------------------------------------
 
-async function expandWithModel(
-  input: {
-    user_intent_verbatim: string;
-    approved_restated_intent: string;
-    included_files: Array<{ path: string; reason: string }>;
-  },
+/**
+ * Phase the advisor tool resolves its model from when invoked outside any
+ * active stage. The synthesis phase is the canonical advisor-aware phase
+ * declared by `piorx-default.workflow.md` and wired in Phase 3, so its
+ * advisor configuration drives the interactive tool by default. Hosts that
+ * want a different default route a different phase id at registration time.
+ */
+const ADVISOR_TOOL_DEFAULT_PHASE: PipelinePhaseId = 'synthesis';
+
+const ADVISOR_TOOL_DEFAULT_USER_MESSAGE =
+  'Review the current pi-orchestra session and surface plan, correction, or stop guidance.';
+
+/**
+ * Tool name registered with pi. The design doc and task brief both use the
+ * `piorx:advisor` identifier; Anthropic's Messages API restricts tool names
+ * to `[a-zA-Z0-9_-]{1,64}`, so the on-the-wire name is `piorx_advisor`. The
+ * underscore substitution preserves the identity ("piorx-namespaced advisor")
+ * while staying provider-portable. Wire compatibility with rpiv-advisor is in
+ * the result shape (`{ content, details: { advisorModel, effort, usage,
+ * stopReason, errorMessage } }`), not the tool name — rpiv-advisor itself
+ * registers as `advisor`, so any consumer matching tool name is already
+ * coupled to one implementation.
+ */
+const PIORX_ADVISOR_TOOL_NAME = 'piorx_advisor';
+
+const ADVISOR_TOOL_DESCRIPTION = [
+  'Consult the piorx advisor for plan, correction, or stop guidance.',
+  'Zero-argument call: the advisor reads the active conversation context and',
+  'returns its recommendation. Returns the rpiv-advisor wire shape',
+  '({ content, details: { advisorModel, effort, usage, stopReason,',
+  'errorMessage } }) so existing rpiv-advisor consumers are drop-in compatible.',
+].join(' ');
+
+function makeAdvisorErrorToolResult(
+  advisorModel: string | null,
+  effort: AdvisorToolDetails['effort'],
+  message: string,
+  stopReason: AdvisorToolDetails['stopReason'] = 'error',
+): AdvisorToolResult {
+  return {
+    content: [{ type: 'text', text: '' }],
+    details: {
+      advisorModel,
+      effort,
+      usage: null,
+      stopReason,
+      errorMessage: message,
+    },
+  };
+}
+
+function thinkingLevelToEffort(level: string | undefined): AdvisorToolDetails['effort'] {
+  if (level === 'high' || level === 'medium' || level === 'low') return level;
+  return null;
+}
+
+/**
+ * Build the advisor `complete()` callback used by the `piorx_advisor` pi
+ * tool. Resolves the advisor model from the model registry, fetches the API
+ * key, and adapts pi-ai's `complete()` shape onto the
+ * `AdvisorCallback` contract `runAdvisorTool` consumes.
+ *
+ * Returns `null` when the host has not configured an advisor for the
+ * resolution phase — the caller surfaces an `errorMessage` on the
+ * wire-compat result rather than throwing.
+ */
+async function buildAdvisorCallback(
   ctx: ExtensionContext,
-  strictJsonMode = false,
-): Promise<ExpandedSpec> {
-  const raw = await getModelText(
-    `${CONDUCTOR_SYSTEM_PREAMBLE}
-
-Expand an approved engineering intent into a concise structured specification.
-Return JSON only with this exact shape:
-{
-  "objective": string,
-  "deliverables": string[],
-  "constraints": string[],
-  "retrieval_focus": string[],
-  "open_questions": string[]
-}
-Do not wrap the JSON in prose. Keep arrays compact and practical.${strictJsonMode ? '\nThis is a retry because the previous response was malformed. Output a single valid JSON object only. No markdown fences. No commentary. No trailing text.' : ''}`,
-    JSON.stringify(input, null, 2),
-    ctx,
-  );
-
-  const parsed = parseExpandedSpec(raw, input);
-  lastExpansionParseMeta = parsed;
-  await logEvent('stage2.expansion_parse', {
-    raw,
-    parsed: parsed.spec,
-    usedFallback: parsed.usedFallback,
-    validationWarnings: parsed.validationWarnings,
-    usedJsonExtraction: extractJsonObject(raw) !== null,
-  });
-  return parsed.spec;
-}
-
-async function requireArtifact<T>(value: Promise<T | null>, label: string): Promise<T> {
-  const artifact = await value;
-  if (!artifact) {
-    throw new Error(`Required artifact missing: ${label}`);
-  }
-  return artifact;
-}
-
-async function getCurrentIntentArtifacts(machine: StageMachine): Promise<{
-  capture: IntentCaptureV1;
-  restatement: IntentRestatementV1;
-}> {
-  const captureId = machine.sessionState.artifacts.intent_capture_id;
-  const restatementId = machine.sessionState.artifacts.intent_restatement_id;
-  if (!captureId || !restatementId) {
-    throw new Error('Intent artifacts are incomplete');
-  }
-
-  const capture = await requireArtifact(
-    runtime.store.get('intent-capture-v1', captureId),
-    captureId,
-  );
-  const restatement = await requireArtifact(
-    runtime.store.get('intent-restatement-v1', restatementId),
-    restatementId,
-  );
-  return { capture, restatement };
-}
-
-function summarizeExpandedSpec(spec: ExpandedSpec): string {
-  return [
-    `Objective: ${spec.objective}`,
-    formatList('Deliverables', spec.deliverables),
-    formatList('Constraints', spec.constraints),
-    formatList('Retrieval focus', spec.retrieval_focus),
-    formatList('Open questions', spec.open_questions),
-  ].join('\n\n');
-}
-
-function createDefaultEvidencePlan(index: RetrievalIndexV1) {
-  return createRecommendedEvidencePlan(index, {
-    target_task: {
-      type: 'analysis-report',
-      task_label: 'analyze codebase or prepare a change plan',
-    },
-  });
-}
-
-function summarizeInspection(
-  inspection: NonNullable<Awaited<ReturnType<typeof inspectRetrievalResult>>['inspection']>,
-) {
-  const selectedFiles = inspection.files.filter((f) => f.selection_tier === 'selected');
-  const reserveFiles = inspection.files.filter((f) => f.selection_tier === 'reserve');
-
-  const selectedLines = selectedFiles
-    .slice(0, 8)
-    .map(
-      (file) =>
-        `${file.path} [${file.default_evidence_mode}] — ${file.selection_reason || file.why_relevant} (${file.symbol_count} symbols)`,
-    );
-
-  const reserveLines = reserveFiles
-    .slice(0, 5)
-    .map((file) => `${file.path} — ${file.selection_reason || file.why_relevant}`);
-
-  const rec = inspection.recommended_evidence;
-  const recommendedSymbolCount = rec.files.reduce(
-    (total, file) => total + file.spans.filter((s) => s.include_span).length,
-    0,
-  );
-  const recommendedLines = [
-    `Files in default plan: ${rec.files.length}`,
-    `Selected symbol spans: ${recommendedSymbolCount}`,
-    `Cross-file findings: ${rec.include_cross_file_findings ? 'yes' : 'no'}`,
-    `Gaps: ${rec.include_gaps ? 'yes' : 'no'}`,
-    `Follow-up queries: ${rec.include_followup_queries ? 'yes' : 'no'}`,
-  ];
-
-  return [
-    `Query: ${inspection.query}`,
-    `Confidence: ${inspection.confidence}`,
-    inspection.strategy_summary ? `Strategy: ${inspection.strategy_summary}` : 'Strategy: (none)',
-    `Scout terms: ${inspection.scout_terms.length > 0 ? inspection.scout_terms.slice(0, 8).join(', ') : 'none'}`,
-    `Files reviewed: ${inspection.file_count} (selected=${inspection.selected_file_count}, reserve=${inspection.reserve_file_count})`,
-    formatList('Selected files', selectedLines, 8),
-    formatList('Reserve candidates', reserveLines, 5),
-    formatList('Recommended default evidence scope', recommendedLines, recommendedLines.length),
-    formatList('Cross-file findings', inspection.cross_file_findings),
-    formatList('Gaps', inspection.gaps),
-    formatList('Follow-up queries', inspection.followup_queries),
-  ].join('\n\n');
-}
-
-function summarizeAnalysisReport(report: AnalysisReportV1): string {
-  return [
-    `Summary: ${report.summary}`,
-    formatList('Findings', report.findings),
-    formatList('Risks', report.risks),
-    formatList('Recommended next steps', report.recommended_next_steps),
-  ].join('\n\n');
-}
-
-function summarizeChangeSpec(spec: ChangeSpecV1): string {
-  const editTargets = spec.edits
-    .slice(0, 5)
-    .map((edit) => `${edit.path} -> ${edit.target.name} (${edit.intent})`);
-
-  return [
-    `Summary: ${spec.summary}`,
-    `Goal: ${spec.change_goal}`,
-    `Edits planned: ${spec.edits.length}`,
-    formatList('Top edit targets', editTargets),
-    formatList('Acceptance criteria', spec.acceptance_criteria),
-    formatList('Tests', spec.tests),
-  ].join('\n\n');
-}
-
-function inferSynthesisTask(intent: string): SynthesisTaskType {
-  const normalized = intent.toLowerCase();
-  if (
-    normalized.includes('fix') ||
-    normalized.includes('implement') ||
-    normalized.includes('edit') ||
-    normalized.includes('change') ||
-    normalized.includes('refactor') ||
-    normalized.includes('improve')
-  ) {
-    return 'change-spec';
-  }
-  return 'analysis-report';
-}
-
-async function runExpansionStage(machine: StageMachine, ctx: ExtensionContext): Promise<void> {
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  const { capture, restatement } = await getCurrentIntentArtifacts(machine);
-  let strictJsonRetry = false;
-  const expansion = new ExpansionController(
-    runtime.store,
-    machine,
-    runtime.config.repoRoot,
-    (input) => expandWithModel(input, ctx, strictJsonRetry),
-  );
-
-  await logEvent('stage2.start', { currentStage: machine.currentStage });
-  ctx.ui.notify(
-    `Stage 2: expansion\n\nRestated intent: ${restatement.restated_intent}\nTagged files: ${capture.tagged_files.length}`,
-    'info',
-  );
-
-  let projectDocResponse: Record<string, boolean> | undefined;
-  const docQuestion = expansion.checkProjectDocInclusion(capture.tagged_files);
-  if (docQuestion) {
-    const includeDocs = await ctx.ui.confirm(
-      'Conductor: include discovered project docs',
-      `${docQuestion.question}\n\n${docQuestion.available_docs.map((doc) => `- ${doc.filename}`).join('\n')}`,
-    );
-    projectDocResponse = Object.fromEntries(
-      docQuestion.available_docs.map((doc) => [doc.filename, includeDocs]),
-    );
-    await logEvent('stage2.project_docs', { includeDocs, docs: docQuestion.available_docs });
-  }
-
-  await expansion.createExpansionInput(capture, restatement, projectDocResponse);
-  await logEvent('stage2.expansion_input_created', { sessionState: machine.sessionState });
-
-  while (true) {
-    const review = await expansion.runExpansion();
-    await logEvent('stage2.expansion_generated', {
-      expansionInputId: review.expansion_input_id,
-      expandedSpec: review.expanded_spec,
-      parseMeta: lastExpansionParseMeta,
-    });
-
-    const parseWarning = lastExpansionParseMeta
-      ? [
-          lastExpansionParseMeta.usedFallback
-            ? 'Warning: expansion response required fallback recovery instead of valid JSON.'
-            : null,
-          ...lastExpansionParseMeta.validationWarnings,
-        ]
-          .filter(Boolean)
-          .join('\n')
-      : '';
-
-    if (lastExpansionParseMeta?.usedFallback) {
-      const retry = await ctx.ui.confirm(
-        'Conductor: fallback expansion recovered',
-        `${review.review_prompt}\n\n${summarizeExpandedSpec(review.expanded_spec)}\n\n${parseWarning}\n\nWould you like to retry expansion generation with stricter JSON instructions before reviewing this version?`,
-      );
-
-      await logEvent('stage2.fallback_retry_decision', {
-        retry,
-        expansionInputId: review.expansion_input_id,
-        warnings: lastExpansionParseMeta.validationWarnings,
-      });
-
-      if (retry) {
-        strictJsonRetry = true;
-        continue;
-      }
+  phase: PipelinePhaseId,
+  thinkingLevel: string | undefined,
+): Promise<
+  | {
+      kind: 'ok';
+      advisorModel: string;
+      effort: AdvisorToolDetails['effort'];
+      advisor: AdvisorCallback;
     }
+  | { kind: 'unconfigured'; reason: string }
+> {
+  const phaseConfig = resolvePhaseModelConfig(runtime.config, phase);
+  const advisorConfig = phaseConfig?.advisor;
+  if (!phaseConfig || !advisorConfig || advisorConfig.mode === 'none' || !advisorConfig.model) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: no advisor configured for phase "${phase}" ` +
+        `(set runtime.config.models.${phase}.advisor)`,
+    };
+  }
 
-    strictJsonRetry = false;
-    const approved = await ctx.ui.confirm(
-      'Conductor: review expanded specification',
-      `${review.review_prompt}\n\n${summarizeExpandedSpec(review.expanded_spec)}${parseWarning ? `\n\n${parseWarning}` : ''}`,
+  // The static type says `executor` is required, but config can be
+  // hand-built or loaded from JSON without going through
+  // `validatePhaseModelConfigs`. Guard so a malformed advisor-only
+  // config surfaces as a clear unconfigured reason instead of a
+  // `cannot read provider of undefined` runtime crash.
+  if (!phaseConfig.executor) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: phase "${phase}" has an advisor configured but no executor ` +
+        `(set runtime.config.models.${phase}.executor)`,
+    };
+  }
+
+  const advisorProvider = phaseConfig.executor.provider;
+  const advisorModelEntry = ctx.modelRegistry.find(advisorProvider, advisorConfig.model);
+  if (!advisorModelEntry) {
+    return {
+      kind: 'unconfigured',
+      reason:
+        `piorx_advisor: advisor model ${advisorProvider}/${advisorConfig.model} ` +
+        `is not registered in the model registry`,
+    };
+  }
+
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(advisorModelEntry);
+  if (!auth.ok || !auth.apiKey) {
+    return {
+      kind: 'unconfigured',
+      reason: auth.ok
+        ? `piorx_advisor: no API key for ${advisorModelEntry.provider}`
+        : `piorx_advisor: ${auth.error}`,
+    };
+  }
+
+  const apiKey = auth.apiKey;
+  const headers = auth.headers;
+
+  const advisor: AdvisorCallback = async (req) => {
+    const userMessage: UserMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: req.userMessage }],
+      timestamp: Date.now(),
+    };
+    const response = await complete(
+      advisorModelEntry,
+      { systemPrompt: req.systemPrompt, messages: [userMessage] },
+      { apiKey, headers, signal: ctx.signal },
     );
-
-    let response: ExpansionReviewResponse;
-    if (approved) {
-      response = { action: 'approve' };
-    } else {
-      const revisedIntent = await ctx.ui.input(
-        'Conductor: revise or reject expansion',
-        'Provide revision text to regenerate the expansion, or leave empty to reject it.',
-      );
-      response = revisedIntent?.trim()
-        ? { action: 'revise', revised_intent: revisedIntent.trim() }
-        : { action: 'reject' };
+    if (response.stopReason === 'aborted') {
+      const result: Awaited<ReturnType<AdvisorCallback>> = {
+        text: '',
+        errorCode: 'aborted',
+      };
+      return result;
     }
-
-    const result = await expansion.submitReview(review.expanded_spec, response);
-    await logEvent('stage2.review_result', {
-      response,
-      outcome: result.outcome,
-      sessionState: machine.sessionState,
-    });
-
-    if (result.outcome === 'approved' || result.outcome === 'rejected') {
-      break;
+    const text = response.content
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+    const result: Awaited<ReturnType<AdvisorCallback>> = { text };
+    if (response.usage) {
+      result.usage = {
+        input_tokens: response.usage.input ?? 0,
+        output_tokens: response.usage.output ?? 0,
+      };
     }
-  }
+    return result;
+  };
 
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-}
+  const effort = thinkingLevelToEffort(thinkingLevel);
 
-async function runRetrievalStage(machine: StageMachine, ctx: ExtensionContext): Promise<void> {
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  await logEvent('stage3.start', {
-    currentStage: machine.currentStage,
-    sessionState: machine.sessionState,
-  });
-  ctx.ui.notify(
-    'Stage 3: retrieval\n\nScanning the repository against the approved intent.',
-    'info',
-  );
-  const allowed = await canStartRetrieval(runtime.store, machine);
-  if (!allowed.allowed) {
-    throw new Error(allowed.reason ?? 'Retrieval is not allowed');
-  }
-
-  const captureId = machine.sessionState.artifacts.intent_capture_id;
-  const restatementId = machine.sessionState.artifacts.intent_restatement_id;
-  if (!captureId || !restatementId) {
-    throw new Error('Retrieval requires capture and restatement IDs');
-  }
-
-  ctx.ui.notify('Starting retrieval...', 'info');
-  const result = await retrievalDispatch(
-    {
-      intent_capture_id: captureId,
-      intent_restatement_id: restatementId,
-      intent_spec_id: machine.sessionState.artifacts.intent_spec_id,
-    },
-    runtime.store,
-    runtime.config,
-    {
-      retrieverAgentModel: makeRetrieverAgentModel(ctx),
-    },
-  );
-  await logEvent('stage3.dispatch_result', result);
-
-  if (result.status !== 'success' || !result.retrieval_index_id) {
-    throw new Error(result.message);
-  }
-
-  await machine.setArtifact('retrieval_index_id', result.retrieval_index_id);
-  await machine.transition('evidence', result.retrieval_index_id);
-
-  const inspection = await inspectRetrievalResult(runtime.store, result.retrieval_index_id);
-  await logEvent(
-    'stage3.inspection',
-    inspection.success ? { inspection: inspection.inspection } : inspection,
-  );
-
-  if (!inspection.success || !inspection.inspection) {
-    throw new Error(inspection.message ?? 'Failed to inspect retrieval result');
-  }
-
-  ctx.ui.notify(`Retrieval complete.\n\n${summarizeInspection(inspection.inspection)}`, 'info');
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-}
-
-async function runEvidenceStage(machine: StageMachine, ctx: ExtensionContext): Promise<void> {
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  await logEvent('stage4.start', {
-    currentStage: machine.currentStage,
-    sessionState: machine.sessionState,
-  });
-  const retrievalIndexId = machine.sessionState.artifacts.retrieval_index_id;
-  if (!retrievalIndexId) {
-    throw new Error('Evidence stage requires retrieval_index_id');
-  }
-
-  const index = await requireArtifact(
-    runtime.store.get('retrieval-index-v1', retrievalIndexId),
-    retrievalIndexId,
-  );
-
-  const defaultPlan = createDefaultEvidencePlan(index);
-  await runtime.store.put(defaultPlan);
-  await machine.setArtifact('evidence_plan_id', defaultPlan.artifact_id);
-  await logEvent('stage4.plan_created', {
-    evidencePlanId: defaultPlan.artifact_id,
-    plan: defaultPlan,
-  });
-  ctx.ui.notify(
-    `Stage 4: evidence planning\n\n${summarizeEvidencePlan(defaultPlan, index)}`,
-    'info',
-  );
-
-  let plan = defaultPlan;
-  const wantsOverrides = await ctx.ui.confirm(
-    'Conductor: apply narrow evidence overrides?',
-    'The retriever-authored default plan is shown above. Apply narrow overrides (promote reserve files, include/exclude symbols, tune neighbor lines) before previewing?',
-  );
-  await logEvent('stage4.override_decision', { wantsOverrides });
-
-  if (wantsOverrides) {
-    const rawInput = await ctx.ui.input('Conductor: evidence overrides', OVERRIDE_HELP);
-    const text = rawInput?.trim() ?? '';
-    if (text) {
-      try {
-        const overrides = parseEvidenceOverridesInput(text);
-        if (overrides.length > 0) {
-          const result = applyEvidenceOverrides({
-            plan: defaultPlan,
-            retrieval_index: index,
-            overrides,
-          });
-          await runtime.store.put(result.plan);
-          await machine.setArtifact('evidence_plan_id', result.plan.artifact_id);
-          plan = result.plan;
-          await logEvent('stage4.overrides_applied', {
-            evidencePlanId: plan.artifact_id,
-            applied: result.applied,
-            overrideCount: overrides.length,
-          });
-          ctx.ui.notify(
-            `Overrides applied (${result.applied.length}):\n${result.applied.map((line) => `  - ${line}`).join('\n')}\n\nAdjusted plan:\n\n${summarizeEvidencePlan(plan, index)}`,
-            'info',
-          );
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await logEvent('stage4.override_error', { message });
-        ctx.ui.notify(
-          `Overrides rejected — keeping retriever defaults.\nReason: ${message}`,
-          'warning',
-        );
-      }
-    }
-  }
-
-  const preview = await evidenceAssemble(
-    {
-      mode: 'preview',
-      retrieval_index_id: retrievalIndexId,
-      evidence_plan_id: plan.artifact_id,
-    },
-    runtime.store,
-  );
-  await logEvent('stage4.preview', preview);
-
-  if (preview.status !== 'success' || !('estimated_lines' in preview)) {
-    throw new Error(preview.message);
-  }
-
-  const proceed = await ctx.ui.confirm(
-    'Conductor: materialize evidence bundle',
-    `${summarizeEvidencePreview(preview)}\n\nProceed?`,
-  );
-  if (!proceed) {
-    throw new Error('Evidence materialization cancelled by user');
-  }
-
-  const materialized = await evidenceAssemble(
-    {
-      mode: 'materialize',
-      retrieval_index_id: retrievalIndexId,
-      evidence_plan_id: plan.artifact_id,
-    },
-    runtime.store,
-  );
-  await logEvent('stage4.materialize', materialized);
-
-  if (
-    materialized.status !== 'success' ||
-    !('evidence_bundle_id' in materialized) ||
-    !materialized.evidence_bundle_id
-  ) {
-    throw new Error(materialized.message);
-  }
-
-  await machine.setArtifact('evidence_bundle_id', materialized.evidence_bundle_id);
-  await machine.transition('synthesis', materialized.evidence_bundle_id);
-  ctx.ui.notify(`Evidence bundle ready: ${materialized.evidence_bundle_id}`, 'info');
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-}
-
-async function runSynthesisStage(
-  machine: StageMachine,
-  ctx: ExtensionContext,
-): Promise<{
-  synthesisType: 'analysis-report-v1' | 'change-spec-v1';
-  synthesisId: string;
-}> {
-  if (!ctx.hasUI) {
-    throw new Error('Synthesis stage requires UI');
-  }
-
-  await logEvent('stage5.start', {
-    currentStage: machine.currentStage,
-    sessionState: machine.sessionState,
-  });
-  ctx.ui.notify(
-    'Stage 5: synthesis\n\nConverting the evidence bundle into an analysis report or change specification.',
-    'info',
-  );
-
-  const captureId = machine.sessionState.artifacts.intent_capture_id;
-  const restatementId = machine.sessionState.artifacts.intent_restatement_id;
-  const evidenceBundleId = machine.sessionState.artifacts.evidence_bundle_id;
-  if (!captureId || !restatementId || !evidenceBundleId) {
-    throw new Error('Synthesis requires capture, restatement, and evidence bundle IDs');
-  }
-
-  const { capture } = await getCurrentIntentArtifacts(machine);
-  const inferred = inferSynthesisTask(capture.user_intent_verbatim);
-  const wantsChanges = await ctx.ui.confirm(
-    'Conductor: synthesis type',
-    `Inferred task: ${inferred}.\n\nWould you like a change specification instead of an analysis report?`,
-  );
-  const taskType: SynthesisTaskType = wantsChanges ? 'change-spec' : 'analysis-report';
-
-  const result = await synthesisDispatch(
-    {
-      task_type: taskType,
-      intent_capture_id: captureId,
-      intent_restatement_id: restatementId,
-      intent_spec_id: machine.sessionState.artifacts.intent_spec_id,
-      evidence_bundle_id: evidenceBundleId,
-      instructions:
-        taskType === 'change-spec'
-          ? 'Produce a concrete change plan grounded in the evidence.'
-          : 'Produce an analysis report grounded in the evidence.',
-    },
-    runtime.store,
-  );
-  await logEvent('stage5.dispatch_result', { taskType, result });
-
-  if (result.status !== 'success' || !result.synthesis_artifact_id) {
-    throw new Error(result.message);
-  }
-
-  await machine.setArtifact('synthesis_id', result.synthesis_artifact_id);
-
-  if (taskType === 'change-spec') {
-    await machine.transition('execution', result.synthesis_artifact_id);
-    const spec = await requireArtifact(
-      runtime.store.get('change-spec-v1', result.synthesis_artifact_id),
-      result.synthesis_artifact_id,
-    );
-    ctx.ui.notify(`Synthesis complete.\n\n${summarizeChangeSpec(spec)}`, 'info');
-    ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-    return { synthesisType: 'change-spec-v1', synthesisId: spec.artifact_id };
-  }
-
-  await machine.transition('idle', result.synthesis_artifact_id);
-  const report = await requireArtifact(
-    runtime.store.get('analysis-report-v1', result.synthesis_artifact_id),
-    result.synthesis_artifact_id,
-  );
-  ctx.ui.notify(`Synthesis complete.\n\n${summarizeAnalysisReport(report)}`, 'info');
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-  return { synthesisType: 'analysis-report-v1', synthesisId: report.artifact_id };
-}
-
-async function runExecutionStage(
-  machine: StageMachine,
-  ctx: ExtensionContext,
-  synthesisId: string,
-) {
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  await logEvent('stage6.start', {
-    currentStage: machine.currentStage,
-    synthesisId,
-    sessionState: machine.sessionState,
-  });
-  ctx.ui.notify(
-    'Stage 6: execution\n\nA change specification was produced and can now be executed.',
-    'info',
-  );
-
-  const execute = await ctx.ui.confirm(
-    'Conductor: execution',
-    'Would you like me to execute the generated change specification?',
-  );
-  await logEvent('stage6.execute_decision', { execute });
-
-  if (!execute) {
-    await machine.transition('idle', synthesisId);
-    ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-    return;
-  }
-
-  const evidenceBundleId = machine.sessionState.artifacts.evidence_bundle_id;
-  if (!evidenceBundleId) {
-    throw new Error('Execution requires evidence_bundle_id');
-  }
-
-  const result = await executionDispatch(
-    {
-      change_spec_id: synthesisId,
-      evidence_bundle_id: evidenceBundleId,
-      execution_constraints: {
-        allow_edits: true,
-        run_validation: true,
-      },
-    },
-    runtime.store,
-  );
-  await logEvent('stage6.dispatch_result', result);
-
-  if (result.status !== 'success' || !result.execution_report_id) {
-    throw new Error(result.message);
-  }
-
-  await machine.setArtifact('execution_report_id', result.execution_report_id);
-  await machine.transition('idle', result.execution_report_id);
-  ctx.ui.notify(`Execution complete: ${result.execution_report_id}`, 'info');
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-}
-
-async function maybeRecursiveRestart(
-  machine: StageMachine,
-  ctx: ExtensionContext,
-  source: { type: 'analysis-report-v1' | 'change-spec-v1'; id: string },
-): Promise<PromotionResult | null> {
-  if (!ctx.hasUI) {
-    return null;
-  }
-
-  const restart = await ctx.ui.confirm('Conductor: recursive restart', getPromotionPrompt());
-  await logEvent('recursive.decision', { restart, source });
-  if (!restart) {
-    return null;
-  }
-
-  const newIntent = await ctx.ui.input(
-    'Conductor: new recursive intent',
-    'Enter the follow-up intent to restart the conductor with...',
-  );
-  if (!newIntent?.trim()) {
-    ctx.ui.notify('Recursive restart skipped: no new intent provided.', 'info');
-    return null;
-  }
-
-  const promoted = await promoteAndRestart(
-    {
-      source_artifact_type: source.type,
-      source_artifact_id: source.id,
-      new_user_intent_verbatim: newIntent.trim(),
-    },
-    runtime.store,
-    machine,
-  );
-  await logEvent('recursive.result', promoted);
-
-  if (promoted.status !== 'success') {
-    throw new Error(promoted.message);
-  }
-
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-  return promoted;
+  return { kind: 'ok', advisorModel: advisorConfig.model, effort, advisor };
 }
 
 async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContext): Promise<void> {
@@ -1042,128 +384,25 @@ async function runPipelineFromIntent(initialIntent: string, ctx: ExtensionContex
   if (!ctx.hasUI) {
     return;
   }
-
-  await logEvent('pipeline.start', { initialIntent, currentStage: machine.currentStage });
-
   if (machine.currentStage !== 'idle') {
     throw new Error(`Pipeline can only start from idle, got ${machine.currentStage}`);
   }
-
-  const controller = new Stage1Controller(runtime.store, machine, (input) =>
-    restateWithModel(input, ctx),
-  );
-
-  const restatementContext = await buildRestatementContext(initialIntent, runtime.config.repoRoot);
-  await controller.captureIntent(initialIntent, restatementContext.taggedFiles, {
-    cleanedIntent: restatementContext.cleanedIntent,
-    intentFileRefs: toIntentFileRefs(restatementContext.files),
-    restatementContext: restatementContext.contextBlock || undefined,
+  await runDefaultPipeline({
+    initialIntent,
+    store: runtime.store,
+    config: runtime.config,
+    ui: makePipelineUI(ctx),
+    logEvent,
+    getModelText: (systemPrompt, userText, phase) =>
+      getModelText(systemPrompt, userText, ctx, phase),
+    retrieverAgentModel: makeRetrieverAgentModel(ctx),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
   });
-  await logEvent('stage1.intent_captured', {
-    sessionState: machine.sessionState,
-    taggedFiles: restatementContext.taggedFiles,
-    intentFileRefs: restatementContext.files.map((file) => ({
-      path: file.path,
-      source: file.source,
-      truncated: file.truncated,
-    })),
-  });
-
-  let restatement = await controller.produceRestatement();
-  await logEvent('stage1.restatement_produced', { restatedIntent: restatement.restated_intent });
-
-  while (true) {
-    const approved = await ctx.ui.confirm(
-      'Conductor: confirm restatement',
-      `${restatement.restated_intent}\n\n${restatement.approval_question}`,
-    );
-    await logEvent('stage1.restatement_decision', {
-      approved,
-      restatedIntent: restatement.restated_intent,
-    });
-
-    if (approved) {
-      const result = await controller.submitApproval(restatement.restated_intent, {
-        approved: true,
-      });
-      if (!result.done) {
-        throw new Error('Unexpected conductor state: approval loop did not complete');
-      }
-      break;
-    }
-
-    const correction = await ctx.ui.input(
-      'Conductor: correct the restatement',
-      'Describe what is wrong or provide a corrected intent...',
-    );
-
-    if (!correction?.trim()) {
-      await logEvent('stage1.cancelled_missing_correction');
-      await machine.reset();
-      ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-      ctx.ui.notify('Conductor Stage 1 cancelled. No correction was provided.', 'info');
-      return;
-    }
-
-    const result = await controller.submitApproval(restatement.restated_intent, {
-      approved: false,
-      correction: correction.trim(),
-    });
-    await logEvent('stage1.restatement_corrected', {
-      correction: correction.trim(),
-      sessionState: machine.sessionState,
-    });
-
-    if (result.done) {
-      break;
-    }
-
-    restatement = result.message;
-  }
-
-  const expand = await ctx.ui.confirm(
-    'Conductor: expansion',
-    controller.getExpansionOffer().expansion_offer,
-  );
-  await logEvent('stage1.expansion_decision', { expand });
-
-  await controller.finalize(restatement.restated_intent, { expand });
-  await logEvent('stage1.finalized', { expand, sessionState: machine.sessionState });
-  ctx.ui.setStatus('orchestra', `stage=${machine.currentStage}`);
-
-  if (expand) {
-    await runExpansionStage(machine, ctx);
-  }
-
-  await runRetrievalStage(machine, ctx);
-  await runEvidenceStage(machine, ctx);
-
-  const synthesis = await runSynthesisStage(machine, ctx);
-
-  if (synthesis.synthesisType === 'change-spec-v1') {
-    await runExecutionStage(machine, ctx, synthesis.synthesisId);
-  }
-
-  const promoted = await maybeRecursiveRestart(machine, ctx, {
-    type: synthesis.synthesisType,
-    id: synthesis.synthesisId,
-  });
-
-  if (promoted) {
-    const recursiveIntent = await requireArtifact(
-      runtime.store.get('recursive-intent-v1', promoted.recursive_intent_id!),
-      promoted.recursive_intent_id!,
-    );
-    ctx.ui.notify('Recursive restart created. Starting next cycle...', 'info');
-    await runPipelineFromIntent(recursiveIntent.new_user_intent_verbatim, ctx);
-    return;
-  }
-
-  await logEvent('pipeline.complete', {
-    finalStage: machine.currentStage,
-    sessionState: machine.sessionState,
-  });
-  ctx.ui.notify(`pi-orchestra pipeline complete at stage=${machine.currentStage}`, 'info');
+  // Refresh the host's stage-machine snapshot so subsequent
+  // `currentStage` reads reflect the executor's session-state writes.
+  runtime.machineReady = StageMachine.init(runtime.config);
+  const refreshed = await runtime.machineReady;
+  ctx.ui.setStatus('orchestra', `stage=${refreshed.currentStage}`);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1191,6 +430,49 @@ export default function (pi: ExtensionAPI) {
         );
       }
     }
+  });
+
+  pi.registerTool({
+    name: PIORX_ADVISOR_TOOL_NAME,
+    label: 'piorx advisor',
+    description: ADVISOR_TOOL_DESCRIPTION,
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, signal, _onUpdate, ctx): Promise<AdvisorToolResult> {
+      let thinkingLevel: string | undefined;
+      try {
+        thinkingLevel = pi.getThinkingLevel?.();
+      } catch {
+        // pi.getThinkingLevel may not be wired in non-interactive harnesses.
+      }
+
+      const built = await buildAdvisorCallback(ctx, ADVISOR_TOOL_DEFAULT_PHASE, thinkingLevel);
+      if (built.kind === 'unconfigured') {
+        const result = makeAdvisorErrorToolResult(null, null, built.reason);
+        await logEvent('runtime.advisor_tool', {
+          advisor_model: result.details.advisorModel,
+          effort: result.details.effort,
+          stop_reason: result.details.stopReason,
+          error_message: result.details.errorMessage,
+          advisor_input_tokens: 0,
+          advisor_output_tokens: 0,
+          disabled_by_env: false,
+        });
+        return result;
+      }
+
+      const systemPrompt = ctx.getSystemPrompt();
+      return runAdvisorTool({
+        request: {
+          systemPrompt,
+          userMessage: ADVISOR_TOOL_DEFAULT_USER_MESSAGE,
+          advisorModel: built.advisorModel,
+          effort: built.effort,
+        },
+        advisor: built.advisor,
+        ...(signal ? { signal } : {}),
+        logEvent,
+      });
+    },
   });
 
   pi.registerCommand('orchestra-status', {

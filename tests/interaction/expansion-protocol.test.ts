@@ -146,14 +146,14 @@ describe('Expansion inclusion protocol', () => {
 
       const input = await expansion.createExpansionInput(capture, restatement);
 
-      expect(input.artifact_type).toBe('expansion-input-v1');
+      expect(input.artifact_type).toBe('piorx/expansion-input@1');
       expect(input.included_files).toEqual([
         { path: 'src/auth.ts', reason: 'user-tagged' },
         { path: 'src/login.ts', reason: 'user-tagged' },
       ]);
 
       // Verify persisted
-      const loaded = await store.get('expansion-input-v1', input.artifact_id);
+      const loaded = await store.get('piorx/expansion-input@1', input.artifact_id);
       expect(loaded).toEqual(input);
     });
 
@@ -266,12 +266,15 @@ describe('Expansion inclusion protocol', () => {
 
       expect(result.outcome).toBe('approved');
       if (result.outcome === 'approved') {
-        expect(result.result.intent_spec.artifact_type).toBe('intent-spec-v1');
+        expect(result.result.intent_spec.artifact_type).toBe('piorx/intent-spec@1');
         expect(result.result.intent_spec.approved).toBe(true);
         expect(result.result.intent_spec.expanded_spec.objective).toBe('Expanded: Test intent');
 
         // Verify persisted
-        const loaded = await store.get('intent-spec-v1', result.result.intent_spec.artifact_id);
+        const loaded = await store.get(
+          'piorx/intent-spec@1',
+          result.result.intent_spec.artifact_id,
+        );
         expect(loaded).toEqual(result.result.intent_spec);
       }
 
@@ -321,7 +324,10 @@ describe('Expansion inclusion protocol', () => {
       });
 
       if (result.outcome === 'revised') {
-        const loaded = await store.get('expansion-input-v1', result.message.expansion_input_id);
+        const loaded = await store.get(
+          'piorx/expansion-input@1',
+          result.message.expansion_input_id,
+        );
         expect(loaded).not.toBeNull();
         expect(loaded!.user_intent_verbatim).toBe('Revised test intent');
       }

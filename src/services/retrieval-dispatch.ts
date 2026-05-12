@@ -19,13 +19,20 @@
  * inside `src/retriever/**`, so retrieval stays pi-agnostic.
  */
 
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { ArtifactStore } from '../artifacts/store.ts';
 import type { PiOrchestraConfig } from '../runtime/config.ts';
+import type { SourceAccessEvent } from '../runtime/session-state.ts';
 import { runRetrieverWorkerDetailed } from '../retriever/worker.ts';
 import { normalizeRetrievalOutput } from '../retriever/normalize.ts';
 import { assembleRetrieverPrompt } from '../retriever/prompt.ts';
 import { runScout } from '../retriever/scout.ts';
-import type { AgentLimits, AgentModelCallback } from '../retriever/agent-types.ts';
+import type {
+  AgentLimits,
+  AgentModelCallback,
+  AgentRoundTrace,
+  ReadFileObservation,
+} from '../retriever/agent-types.ts';
 
 // ---------------------------------------------------------------------------
 // Contract
@@ -52,6 +59,55 @@ export interface RetrievalDispatchResult {
   status: 'not_implemented' | 'success' | 'error';
   retrieval_index_id: string | null;
   message: string;
+  /**
+   * Source-access events extracted from the bounded retriever-agent's
+   * `read_file` actions. Empty when no model callback drove the agent loop
+   * (deterministic scout-only path) or when the agent took no `read_file`
+   * actions. Surfaces to lineage through the retrieval stage adapter so the
+   * audit trail satisfies the default workflow's
+   * `evidence_requirements: ['source-access-events']` for retrieval per
+   * `docs/composability.md` "Phase 1 — lineage extensions".
+   *
+   * Scout-side bulk file scoring is intentionally NOT recorded here — the
+   * audit value is in the model-driven decisions about what to inspect, not
+   * the infrastructural scoring sweep.
+   */
+  source_access_events?: SourceAccessEvent[];
+}
+
+// ---------------------------------------------------------------------------
+// Source-access event extraction (agent trace -> lineage)
+// ---------------------------------------------------------------------------
+
+function toRepoRelative(repoRoot: string, path: string): string {
+  const absolute = isAbsolute(path) ? path : resolve(repoRoot, path);
+  const rel = relative(repoRoot, absolute);
+  return rel === '' ? '.' : rel;
+}
+
+function extractSourceAccessEvents(
+  trace: readonly AgentRoundTrace[],
+  repoRoot: string,
+): SourceAccessEvent[] {
+  const events: SourceAccessEvent[] = [];
+  for (const round of trace) {
+    for (let i = 0; i < round.actions.length; i++) {
+      const action = round.actions[i];
+      const observation = round.observations[i];
+      if (!action || action.type !== 'read_file') continue;
+      if (!observation || observation.action !== 'read_file') continue;
+      const obs = observation as ReadFileObservation;
+      if (obs.error) continue;
+      const event: SourceAccessEvent = {
+        file_path: toRepoRelative(repoRoot, obs.path),
+        read_at: new Date().toISOString(),
+        budget: { lines: obs.count },
+      };
+      if (action.reason) event.reason = action.reason;
+      events.push(event);
+    }
+  }
+  return events;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +125,7 @@ export async function retrievalDispatch(
   options: RetrievalDispatchOptions = {},
 ): Promise<RetrievalDispatchResult> {
   // Load the intent capture to get the query text
-  const capture = await store.get('intent-capture-v1', input.intent_capture_id);
+  const capture = await store.get('piorx/intent-capture@1', input.intent_capture_id);
   if (!capture) {
     return {
       status: 'error',
@@ -79,7 +135,7 @@ export async function retrievalDispatch(
   }
 
   // Load restatement for the restated query
-  const restatement = await store.get('intent-restatement-v1', input.intent_restatement_id);
+  const restatement = await store.get('piorx/intent-restatement@1', input.intent_restatement_id);
   if (!restatement) {
     return {
       status: 'error',
@@ -91,7 +147,7 @@ export async function retrievalDispatch(
   // Load intent spec if available, for retrieval focus hints
   let retrievalFocus: string[] | undefined;
   if (input.intent_spec_id) {
-    const spec = await store.get('intent-spec-v1', input.intent_spec_id);
+    const spec = await store.get('piorx/intent-spec@1', input.intent_spec_id);
     if (spec) {
       retrievalFocus = spec.expanded_spec.retrieval_focus;
     }
@@ -163,9 +219,17 @@ export async function retrievalDispatch(
     ? `, agent rounds=${workerResult.agent.telemetry.roundsExecuted}, stop=${workerResult.agent.telemetry.stopReason}`
     : '';
 
-  return {
+  const sourceAccessEvents = workerResult.agent
+    ? extractSourceAccessEvents(workerResult.agent.trace, config.repoRoot)
+    : [];
+
+  const dispatchResult: RetrievalDispatchResult = {
     status: 'success',
     retrieval_index_id: result.artifact.artifact_id,
     message: `Retrieval complete: ${selectedCount} selected, ${reserveCount} reserve, confidence=${result.artifact.confidence}${agentNote}`,
   };
+  if (sourceAccessEvents.length > 0) {
+    dispatchResult.source_access_events = sourceAccessEvents;
+  }
+  return dispatchResult;
 }

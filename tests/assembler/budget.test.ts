@@ -20,7 +20,7 @@ import type { EvidencePlanV1, RetrievalIndexV1 } from '../../src/artifacts/types
 
 function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_test',
     intent_capture_id: 'ic_1',
     intent_restatement_id: 'ir_1',
@@ -131,10 +131,10 @@ function makeIndex(overrides?: Partial<RetrievalIndexV1>): RetrievalIndexV1 {
 
 function makePlan(overrides?: Partial<EvidencePlanV1>): EvidencePlanV1 {
   return {
-    artifact_type: 'evidence-plan-v1',
+    artifact_type: 'piorx/evidence-plan@1',
     artifact_id: 'plan_test',
     retrieval_index: {
-      artifact_type: 'retrieval-index-v1',
+      artifact_type: 'piorx/retrieval-index@1',
       artifact_id: 'ri_test',
     },
     selection: {
@@ -500,10 +500,10 @@ describe('estimateRecommendedBudget', () => {
     // Simulate the legacy summary-for-all default: every retrieved file gets
     // summary + ast skeleton + first-two-symbol spans.
     const legacyPlan: EvidencePlanV1 = {
-      artifact_type: 'evidence-plan-v1',
+      artifact_type: 'piorx/evidence-plan@1',
       artifact_id: 'plan_legacy',
       retrieval_index: {
-        artifact_type: 'retrieval-index-v1',
+        artifact_type: 'piorx/retrieval-index@1',
         artifact_id: index.artifact_id,
       },
       selection: {

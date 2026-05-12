@@ -1,0 +1,984 @@
+/**
+ * `runWithAdvisor` tests (COMP-P2-T2 acceptance).
+ *
+ * Covers the three modes (`inline`, `custom`, `server`), uniform telemetry
+ * shape, the kill-switch (`PIORX_DISABLE_ADVISOR`), and beta-header
+ * defense-in-depth (advisor doc §4.2 / §4.3 / §4.6).
+ */
+
+import { describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, appendFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import {
+  type PhaseModelConfig,
+  type PhaseModelConfigs,
+  type PipelinePhaseId,
+  validatePhaseModelConfigs,
+} from '../../src/runtime/config.ts';
+import {
+  ADVISOR_BETA_HEADER_NAME,
+  ADVISOR_BETA_HEADER_VALUE,
+  ADVISOR_DISABLE_ENV,
+  type AdvisorCallback,
+  type AdvisorTelemetry,
+  type AdvisorToolResult,
+  type ExecutorCallback,
+  type ExecutorRequest,
+  isAdvisorDisabledByEnv,
+  runAdvisorTool,
+  runWithAdvisor,
+} from '../../src/runtime/run-with-advisor.ts';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function executorConfig(overrides: Partial<PhaseModelConfig> = {}): PhaseModelConfig {
+  return {
+    executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ...overrides,
+  };
+}
+
+function makeStubExecutor(): {
+  callback: ExecutorCallback;
+  calls: ExecutorRequest[];
+  setResponse(response: {
+    text?: string;
+    iterations?: Array<{ type: 'message' | 'advisor_message'; input: number; output: number }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+    advisorErrorCode?: string;
+  }): void;
+} {
+  const calls: ExecutorRequest[] = [];
+  type IterationPlan = { type: 'message' | 'advisor_message'; input: number; output: number };
+  let plan: {
+    text: string;
+    iterations: IterationPlan[];
+    usage: { input_tokens?: number; output_tokens?: number } | undefined;
+    advisorErrorCode: string | undefined;
+  } = {
+    text: 'executor-response',
+    iterations: [{ type: 'message', input: 100, output: 50 }],
+    usage: undefined,
+    advisorErrorCode: undefined,
+  };
+  return {
+    calls,
+    setResponse(response) {
+      plan = {
+        text: response.text ?? plan.text,
+        iterations: response.iterations ?? plan.iterations,
+        usage: response.usage,
+        advisorErrorCode: response.advisorErrorCode,
+      };
+    },
+    callback: async (req) => {
+      calls.push(req);
+      // Custom-mode: simulate the executor calling the advisor tool once.
+      if (req.extras.customAdvisorHandler) {
+        await req.extras.customAdvisorHandler({
+          systemPrompt: 'advisor-system',
+          userMessage: 'advisor-user',
+        });
+      }
+      const response: Awaited<ReturnType<ExecutorCallback>> = {
+        text: plan.text,
+        iterations: plan.iterations.map((row) => ({
+          type: row.type,
+          input_tokens: row.input,
+          output_tokens: row.output,
+        })),
+      };
+      if (plan.usage) response.usage = plan.usage;
+      if (plan.advisorErrorCode) response.advisorErrorCode = plan.advisorErrorCode;
+      return response;
+    },
+  };
+}
+
+function makeStubAdvisor(): {
+  callback: AdvisorCallback;
+  calls: Array<{ systemPrompt: string; userMessage: string }>;
+  setResponse(response: {
+    text?: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+    errorCode?: string;
+  }): void;
+} {
+  const calls: Array<{ systemPrompt: string; userMessage: string }> = [];
+  let plan = {
+    text: 'advisor-text',
+    usage: { input_tokens: 30, output_tokens: 10 } as
+      | { input_tokens?: number; output_tokens?: number }
+      | undefined,
+    errorCode: undefined as string | undefined,
+  };
+  return {
+    calls,
+    setResponse(response) {
+      plan = {
+        text: response.text ?? plan.text,
+        usage: response.usage ?? plan.usage,
+        errorCode: response.errorCode,
+      };
+    },
+    callback: async (req) => {
+      calls.push(req);
+      const response: Awaited<ReturnType<AdvisorCallback>> = { text: plan.text };
+      if (plan.usage) response.usage = plan.usage;
+      if (plan.errorCode) response.errorCode = plan.errorCode;
+      return response;
+    },
+  };
+}
+
+const TELEMETRY_KEYS: Array<keyof AdvisorTelemetry> = [
+  'phase',
+  'mode',
+  'executor_model',
+  'executor_provider',
+  'advisor_model',
+  'advisor_iterations',
+  'advisor_input_tokens',
+  'advisor_output_tokens',
+  'executor_input_tokens',
+  'executor_output_tokens',
+  'duration_ms',
+  'beta_header_sent',
+  'disabled_by_env',
+  'error_code',
+];
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('runWithAdvisor — kill switch', () => {
+  test('isAdvisorDisabledByEnv recognizes truthy values', () => {
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: '1' })).toBe(true);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: 'true' })).toBe(true);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: 'YES' })).toBe(true);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: 'on' })).toBe(true);
+  });
+
+  test('isAdvisorDisabledByEnv treats absent / empty / falsy as off', () => {
+    expect(isAdvisorDisabledByEnv({})).toBe(false);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: '' })).toBe(false);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: '0' })).toBe(false);
+    expect(isAdvisorDisabledByEnv({ [ADVISOR_DISABLE_ENV]: 'false' })).toBe(false);
+  });
+
+  test('PIORX_DISABLE_ADVISOR=1 forces all advisor calls to be skipped', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    const config = executorConfig({
+      advisor: { mode: 'custom', model: 'claude-opus-4-7' },
+    });
+
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'hi' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+        env: { [ADVISOR_DISABLE_ENV]: '1' },
+      },
+    );
+
+    expect(advisor.calls).toHaveLength(0);
+    expect(result.disabledByEnv).toBe(true);
+    expect(result.telemetry.disabled_by_env).toBe(true);
+    expect(result.telemetry.beta_header_sent).toBe(false);
+    // executor still ran solo
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.extras.customAdvisorHandler).toBeNull();
+    expect(executor.calls[0]?.extras.serverAdvisor).toBeNull();
+  });
+});
+
+describe('runWithAdvisor — telemetry uniformity', () => {
+  test('all three modes emit a record with the same shape', async () => {
+    const records: AdvisorTelemetry[] = [];
+
+    for (const mode of ['inline', 'custom', 'server'] as const) {
+      const executor = makeStubExecutor();
+      const advisor = makeStubAdvisor();
+      const config = executorConfig({
+        advisor: { mode, model: 'claude-opus-4-7' },
+      });
+
+      const result = await runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'hi' },
+        {
+          phase: 'synthesis',
+          config,
+          executor: executor.callback,
+          advisor: advisor.callback,
+          now: () => records.length, // deterministic, monotonic
+        },
+      );
+      records.push(result.telemetry);
+    }
+
+    expect(records).toHaveLength(3);
+    for (const record of records) {
+      const keys = Object.keys(record).sort();
+      expect(keys).toEqual([...TELEMETRY_KEYS].sort());
+      expect(record.executor_model).toBe('claude-sonnet-4-6');
+      expect(record.executor_provider).toBe('anthropic');
+      expect(record.advisor_model).toBe('claude-opus-4-7');
+      expect(record.disabled_by_env).toBe(false);
+      expect(record.error_code).toBeNull();
+    }
+    expect(records.map((r) => r.mode)).toEqual(['inline', 'custom', 'server']);
+  });
+
+  test('mode=none records advisor_model: null and beta_header_sent: false', async () => {
+    const executor = makeStubExecutor();
+    const config = executorConfig();
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'hi' },
+      { phase: 'restatement', config, executor: executor.callback },
+    );
+    expect(result.telemetry.mode).toBe('none');
+    expect(result.telemetry.advisor_model).toBeNull();
+    expect(result.telemetry.beta_header_sent).toBe(false);
+    expect(result.telemetry.advisor_iterations).toBe(0);
+  });
+
+  test('logEvent receives the telemetry record once per call', async () => {
+    const executor = makeStubExecutor();
+    const events: Array<{ message: string; details: unknown }> = [];
+    const config = executorConfig({ advisor: { mode: 'custom', model: 'claude-opus-4-7' } });
+    await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'hi' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: makeStubAdvisor().callback,
+        logEvent: (message, details) => {
+          events.push({ message, details });
+        },
+      },
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.message).toBe('runtime.run_with_advisor');
+  });
+});
+
+describe('runWithAdvisor — mode dispatch', () => {
+  test('inline mode runs the advisor first and prepends the plan', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'do A then B', usage: { input_tokens: 5, output_tokens: 7 } });
+
+    const config = executorConfig({ advisor: { mode: 'inline', model: 'claude-opus-4-7' } });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'expansion',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+      },
+    );
+
+    expect(advisor.calls).toHaveLength(1);
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.userMessage).toContain('<advisor_plan>');
+    expect(executor.calls[0]?.userMessage).toContain('do A then B');
+    expect(executor.calls[0]?.userMessage).toContain('task');
+    expect(executor.calls[0]?.extras.customAdvisorHandler).toBeNull();
+    expect(executor.calls[0]?.extras.serverAdvisor).toBeNull();
+    expect(result.telemetry.advisor_iterations).toBe(1);
+    expect(result.telemetry.advisor_input_tokens).toBe(5);
+    expect(result.telemetry.advisor_output_tokens).toBe(7);
+  });
+
+  test('custom mode wraps the advisor as a tool callback', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'plan', usage: { input_tokens: 12, output_tokens: 4 } });
+
+    const config = executorConfig({ advisor: { mode: 'custom', model: 'claude-opus-4-7' } });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'work' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+      },
+    );
+
+    // executor stub's makeStubExecutor invokes the handler exactly once
+    expect(advisor.calls).toHaveLength(1);
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.extras.customAdvisorHandler).not.toBeNull();
+    expect(executor.calls[0]?.extras.serverAdvisor).toBeNull();
+    expect(executor.calls[0]?.userMessage).toBe('work');
+    // Custom mode routes the advisor's usage into the iteration list.
+    expect(result.telemetry.advisor_iterations).toBe(1);
+    expect(result.telemetry.advisor_input_tokens).toBe(12);
+    expect(result.telemetry.advisor_output_tokens).toBe(4);
+  });
+
+  test('server mode forwards a server-tool block and the beta header', async () => {
+    const executor = makeStubExecutor();
+    executor.setResponse({
+      text: 'done',
+      iterations: [
+        { type: 'message', input: 200, output: 80 },
+        { type: 'advisor_message', input: 50, output: 20 },
+        { type: 'advisor_message', input: 30, output: 15 },
+      ],
+    });
+
+    const config = executorConfig({
+      advisor: {
+        mode: 'server',
+        model: 'claude-opus-4-7',
+        maxUses: 3,
+        caching: 'ephemeral-5m',
+      },
+    });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        // No advisor callback required in server mode.
+      },
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    const extras = executor.calls[0]!.extras;
+    expect(extras.serverAdvisor).toEqual({
+      type: 'advisor_20260301',
+      name: 'advisor',
+      model: 'claude-opus-4-7',
+      max_uses: 3,
+      caching: { type: 'ephemeral', ttl: '5m' },
+    });
+    expect(extras.headers[ADVISOR_BETA_HEADER_NAME]).toBe(ADVISOR_BETA_HEADER_VALUE);
+    // Server-mode telemetry pulls advisor rows out of executor iterations.
+    expect(result.telemetry.advisor_iterations).toBe(2);
+    expect(result.telemetry.advisor_input_tokens).toBe(80);
+    expect(result.telemetry.advisor_output_tokens).toBe(35);
+    expect(result.telemetry.executor_input_tokens).toBe(200);
+    expect(result.telemetry.executor_output_tokens).toBe(80);
+  });
+
+  test('server mode without advisor.model raises before calling the executor', async () => {
+    const executor = makeStubExecutor();
+    const config: PhaseModelConfig = {
+      executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      advisor: { mode: 'server' },
+    };
+    await expect(
+      runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'task' },
+        { phase: 'synthesis', config, executor: executor.callback },
+      ),
+    ).rejects.toThrow(/server mode requires advisor\.model/);
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  test('custom / inline modes throw when advisor callback is missing', async () => {
+    const executor = makeStubExecutor();
+    for (const mode of ['custom', 'inline'] as const) {
+      const config = executorConfig({ advisor: { mode, model: 'claude-opus-4-7' } });
+      await expect(
+        runWithAdvisor(
+          { systemPrompt: 'sys', userMessage: 'task' },
+          { phase: 'synthesis', config, executor: executor.callback },
+        ),
+      ).rejects.toThrow(/advisor callback is required/);
+    }
+  });
+});
+
+describe('runWithAdvisor — defense-in-depth', () => {
+  test('beta header is added when advisor is enabled, omitted when not', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    const enabledConfig = executorConfig({
+      advisor: { mode: 'custom', model: 'claude-opus-4-7' },
+    });
+    await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'synthesis',
+        config: enabledConfig,
+        executor: executor.callback,
+        advisor: advisor.callback,
+      },
+    );
+    expect(executor.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBe(
+      ADVISOR_BETA_HEADER_VALUE,
+    );
+
+    const executor2 = makeStubExecutor();
+    const noneConfig = executorConfig();
+    await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      { phase: 'restatement', config: noneConfig, executor: executor2.callback },
+    );
+    expect(executor2.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBeUndefined();
+  });
+
+  test('shared-history phases force the beta header even with advisor=none', async () => {
+    const executor = makeStubExecutor();
+    const config = executorConfig();
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'restatement',
+        config,
+        executor: executor.callback,
+        sharedHistory: true,
+      },
+    );
+    expect(executor.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBe(
+      ADVISOR_BETA_HEADER_VALUE,
+    );
+    expect(result.telemetry.beta_header_sent).toBe(true);
+  });
+
+  test('advisor blocks are stripped from user message when beta is not sent', async () => {
+    const executor = makeStubExecutor();
+    const userMessage =
+      'before <advisor_tool_result>secret</advisor_tool_result> middle <advisor_tool_result>x</advisor_tool_result> after';
+    const config = executorConfig();
+    await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage },
+      { phase: 'restatement', config, executor: executor.callback },
+    );
+    expect(executor.calls[0]?.userMessage).toBe('before  middle  after');
+  });
+
+  test('advisor blocks survive when beta is sent', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    const userMessage = 'turn <advisor_tool_result>plan</advisor_tool_result> end';
+    const config = executorConfig({ advisor: { mode: 'custom', model: 'claude-opus-4-7' } });
+    await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+      },
+    );
+    expect(executor.calls[0]?.userMessage).toBe(userMessage);
+  });
+
+  test('disabled-by-env wins over an enabled advisor config', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    const config = executorConfig({ advisor: { mode: 'server', model: 'claude-opus-4-7' } });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+        env: { [ADVISOR_DISABLE_ENV]: 'true' },
+      },
+    );
+    expect(executor.calls[0]?.extras.serverAdvisor).toBeNull();
+    expect(executor.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBeUndefined();
+    expect(result.disabledByEnv).toBe(true);
+  });
+});
+
+describe('runWithAdvisor — error surfacing', () => {
+  test('advisor error code surfaces in telemetry (custom mode)', async () => {
+    const executor = makeStubExecutor();
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: '', errorCode: 'max_uses_exceeded' });
+
+    const config = executorConfig({
+      advisor: { mode: 'custom', model: 'claude-opus-4-7', maxUses: 1 },
+    });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      {
+        phase: 'synthesis',
+        config,
+        executor: executor.callback,
+        advisor: advisor.callback,
+      },
+    );
+    expect(result.telemetry.error_code).toBe('max_uses_exceeded');
+  });
+
+  test('advisor error code surfaces in telemetry (server mode)', async () => {
+    const executor = makeStubExecutor();
+    executor.setResponse({
+      text: 'done',
+      iterations: [{ type: 'message', input: 100, output: 50 }],
+      advisorErrorCode: 'overloaded',
+    });
+
+    const config = executorConfig({
+      advisor: { mode: 'server', model: 'claude-opus-4-7' },
+    });
+    const result = await runWithAdvisor(
+      { systemPrompt: 'sys', userMessage: 'task' },
+      { phase: 'synthesis', config, executor: executor.callback },
+    );
+    expect(result.telemetry.error_code).toBe('overloaded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P2-T4 — Phase 2 verification gate.
+//
+// Acceptance criteria:
+//   1. All existing tests pass with advisor.mode=none (the suite has 600+
+//      tests; this block additionally proves the property explicitly per
+//      PipelinePhaseId by running runWithAdvisor for each phase).
+//   2. Stubbed advisor produces telemetry without changing executor output.
+//   3. No regressions in the agentic-retrieval E2E flow (asserted in
+//      tests/interaction/agentic-retrieval-flow.test.ts).
+// ---------------------------------------------------------------------------
+
+const ALL_PIPELINE_PHASES: PipelinePhaseId[] = [
+  'restatement',
+  'expansion',
+  'retrieval',
+  'synthesis',
+  'execution',
+];
+
+function buildAdvisorNoneConfigs(): PhaseModelConfigs {
+  const block: PhaseModelConfigs = {};
+  for (const phase of ALL_PIPELINE_PHASES) {
+    block[phase] = {
+      executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      advisor: { mode: 'none' },
+    };
+  }
+  return block;
+}
+
+function buildAdvisorCustomConfigs(): PhaseModelConfigs {
+  const block: PhaseModelConfigs = {};
+  for (const phase of ALL_PIPELINE_PHASES) {
+    block[phase] = {
+      executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      advisor: { mode: 'custom', model: 'claude-opus-4-7' },
+    };
+  }
+  return block;
+}
+
+describe('runWithAdvisor — Phase 2 gate (COMP-P2-T4)', () => {
+  test('advisor=none for every PipelinePhaseId leaves executor output and advisor telemetry pristine', async () => {
+    const configs = buildAdvisorNoneConfigs();
+    const validation = validatePhaseModelConfigs(configs);
+    expect(validation.ok).toBe(true);
+    expect(validation.errors).toEqual([]);
+
+    for (const phase of ALL_PIPELINE_PHASES) {
+      const phaseConfig = configs[phase] as PhaseModelConfig;
+      const executor = makeStubExecutor();
+      const advisor = makeStubAdvisor();
+      const result = await runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'task' },
+        {
+          phase,
+          config: phaseConfig,
+          executor: executor.callback,
+          advisor: advisor.callback,
+        },
+      );
+      expect(advisor.calls).toHaveLength(0);
+      expect(executor.calls).toHaveLength(1);
+      expect(result.text).toBe('executor-response');
+      expect(result.telemetry.mode).toBe('none');
+      expect(result.telemetry.advisor_model).toBeNull();
+      expect(result.telemetry.advisor_iterations).toBe(0);
+      expect(result.telemetry.advisor_input_tokens).toBe(0);
+      expect(result.telemetry.advisor_output_tokens).toBe(0);
+      expect(result.telemetry.beta_header_sent).toBe(false);
+      expect(result.telemetry.disabled_by_env).toBe(false);
+      expect(result.telemetry.error_code).toBeNull();
+      // No advisor markers smuggled into the executor request.
+      expect(executor.calls[0]?.extras.serverAdvisor).toBeNull();
+      expect(executor.calls[0]?.extras.customAdvisorHandler).toBeNull();
+      expect(executor.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBeUndefined();
+    }
+  });
+
+  test('advisor=custom against stubbed advisor preserves executor output across every phase', async () => {
+    // Capture the advisor=none baseline output text per phase, then re-run
+    // with advisor=custom and assert the executor returns the same text.
+    // (The stub's executor returns `executor-response` independent of the
+    // advisor leg — exactly the property a stubbed-advisor smoke needs.)
+    const noneConfigs = buildAdvisorNoneConfigs();
+    const customConfigs = buildAdvisorCustomConfigs();
+    const customValidation = validatePhaseModelConfigs(customConfigs);
+    expect(customValidation.ok).toBe(true);
+
+    for (const phase of ALL_PIPELINE_PHASES) {
+      const noneExecutor = makeStubExecutor();
+      const noneResult = await runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'task' },
+        {
+          phase,
+          config: noneConfigs[phase] as PhaseModelConfig,
+          executor: noneExecutor.callback,
+        },
+      );
+
+      const customExecutor = makeStubExecutor();
+      const customAdvisor = makeStubAdvisor();
+      const customResult = await runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'task' },
+        {
+          phase,
+          config: customConfigs[phase] as PhaseModelConfig,
+          executor: customExecutor.callback,
+          advisor: customAdvisor.callback,
+        },
+      );
+
+      // Executor output text and per-iteration message rows are unchanged by
+      // the advisor leg in custom mode — only advisor_* telemetry differs.
+      expect(customResult.text).toBe(noneResult.text);
+      expect(customExecutor.calls[0]?.userMessage).toBe(noneExecutor.calls[0]?.userMessage);
+      expect(customExecutor.calls[0]?.systemPrompt).toBe(noneExecutor.calls[0]?.systemPrompt);
+
+      // Advisor telemetry now reflects the stubbed consultation.
+      expect(customResult.telemetry.mode).toBe('custom');
+      expect(customResult.telemetry.advisor_model).toBe('claude-opus-4-7');
+      expect(customResult.telemetry.advisor_iterations).toBe(1);
+      expect(customResult.telemetry.advisor_input_tokens).toBe(30);
+      expect(customResult.telemetry.advisor_output_tokens).toBe(10);
+      expect(customResult.telemetry.beta_header_sent).toBe(true);
+      expect(customResult.telemetry.disabled_by_env).toBe(false);
+      expect(customResult.telemetry.error_code).toBeNull();
+
+      // The beta header is added on the executor request when the advisor
+      // is enabled — the executor would receive prior advisor_tool_result
+      // blocks if any were in the user message.
+      expect(customExecutor.calls[0]?.extras.headers[ADVISOR_BETA_HEADER_NAME]).toBe(
+        ADVISOR_BETA_HEADER_VALUE,
+      );
+      expect(customExecutor.calls[0]?.extras.customAdvisorHandler).not.toBeNull();
+    }
+  });
+
+  test('telemetry records appear in .pi/orchestra.log when advisor=custom against a stubbed advisor', async () => {
+    // Use a real file-write `logEvent` mirroring the host's
+    // extensions/conductor-extension.ts:54-62 implementation so the gate
+    // matches the production telemetry sink shape.
+    const dir = await mkdtemp(join(tmpdir(), 'piorx-p2-gate-'));
+    try {
+      const logPath = resolve(dir, '.pi', 'orchestra.log');
+      const logEvent = async (message: string, details?: unknown): Promise<void> => {
+        const payload =
+          details && typeof details === 'object'
+            ? { ts: new Date().toISOString(), message, ...(details as Record<string, unknown>) }
+            : { ts: new Date().toISOString(), message, details };
+        const line = JSON.stringify(payload);
+        await mkdir(dirname(logPath), { recursive: true });
+        await appendFile(logPath, `${line}\n`, 'utf-8');
+      };
+
+      const customConfigs = buildAdvisorCustomConfigs();
+      for (const phase of ALL_PIPELINE_PHASES) {
+        const executor = makeStubExecutor();
+        const advisor = makeStubAdvisor();
+        const result = await runWithAdvisor(
+          { systemPrompt: 'sys', userMessage: 'task' },
+          {
+            phase,
+            config: customConfigs[phase] as PhaseModelConfig,
+            executor: executor.callback,
+            advisor: advisor.callback,
+            logEvent,
+          },
+        );
+        // Stubbed-model property: executor output is unchanged regardless
+        // of the advisor mode (the stubs are deterministic).
+        expect(result.text).toBe('executor-response');
+      }
+
+      const raw = await readFile(logPath, 'utf-8');
+      const lines = raw
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      // One record per phase; each record carries the advisor telemetry
+      // shape and the canonical message string consumed by the eval harness.
+      expect(lines).toHaveLength(ALL_PIPELINE_PHASES.length);
+      const phasesSeen = new Set<string>();
+      for (const line of lines) {
+        expect(line.message).toBe('runtime.run_with_advisor');
+        expect(typeof line.ts).toBe('string');
+        expect(line.mode).toBe('custom');
+        expect(line.executor_model).toBe('claude-sonnet-4-6');
+        expect(line.executor_provider).toBe('anthropic');
+        expect(line.advisor_model).toBe('claude-opus-4-7');
+        expect(line.advisor_iterations).toBe(1);
+        expect(line.beta_header_sent).toBe(true);
+        expect(line.disabled_by_env).toBe(false);
+        expect(line.error_code).toBeNull();
+        expect(typeof line.duration_ms).toBe('number');
+        phasesSeen.add(line.phase as string);
+      }
+      expect(phasesSeen).toEqual(new Set<string>(ALL_PIPELINE_PHASES));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('advisor=none with logEvent emits exactly one record per call with advisor fields nulled out', async () => {
+    // Defense-in-depth: even with advisor=none, the helper always writes a
+    // telemetry record so cost-per-task reconstruction has the full set of
+    // executor calls, not just the advisor-enabled subset.
+    const records: Array<{ message: string; details: unknown }> = [];
+    const noneConfigs = buildAdvisorNoneConfigs();
+
+    for (const phase of ALL_PIPELINE_PHASES) {
+      const executor = makeStubExecutor();
+      await runWithAdvisor(
+        { systemPrompt: 'sys', userMessage: 'task' },
+        {
+          phase,
+          config: noneConfigs[phase] as PhaseModelConfig,
+          executor: executor.callback,
+          logEvent: (message, details) => {
+            records.push({ message, details });
+          },
+        },
+      );
+    }
+
+    expect(records).toHaveLength(ALL_PIPELINE_PHASES.length);
+    for (const record of records) {
+      expect(record.message).toBe('runtime.run_with_advisor');
+      const t = record.details as AdvisorTelemetry;
+      expect(t.mode).toBe('none');
+      expect(t.advisor_model).toBeNull();
+      expect(t.advisor_iterations).toBe(0);
+      expect(t.advisor_input_tokens).toBe(0);
+      expect(t.advisor_output_tokens).toBe(0);
+      expect(t.beta_header_sent).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runAdvisorTool — piorx:advisor pi-tool seam (COMP-P5-T1)
+// ---------------------------------------------------------------------------
+
+const ADVISOR_TOOL_DETAIL_KEYS = [
+  'advisorModel',
+  'effort',
+  'usage',
+  'stopReason',
+  'errorMessage',
+] as const;
+
+function expectWireCompatShape(result: AdvisorToolResult): void {
+  expect(Array.isArray(result.content)).toBe(true);
+  for (const part of result.content) {
+    expect(part.type).toBe('text');
+    expect(typeof part.text).toBe('string');
+  }
+  const detailKeys = Object.keys(result.details).sort();
+  expect(detailKeys).toEqual([...ADVISOR_TOOL_DETAIL_KEYS].sort());
+}
+
+describe('runAdvisorTool — wire-compat with rpiv-advisor', () => {
+  test('success path returns rpiv-advisor wire shape with end_turn stop reason', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'recommendation', usage: { input_tokens: 42, output_tokens: 7 } });
+
+    const result = await runAdvisorTool({
+      request: {
+        systemPrompt: 'sys',
+        userMessage: 'review',
+        advisorModel: 'claude-opus-4-7',
+        effort: 'high',
+      },
+      advisor: advisor.callback,
+    });
+
+    expectWireCompatShape(result);
+    expect(result.content).toEqual([{ type: 'text', text: 'recommendation' }]);
+    expect(result.details.advisorModel).toBe('claude-opus-4-7');
+    expect(result.details.effort).toBe('high');
+    expect(result.details.usage).toEqual({ inputTokens: 42, outputTokens: 7 });
+    expect(result.details.stopReason).toBe('end_turn');
+    expect(result.details.errorMessage).toBeNull();
+    expect(advisor.calls).toHaveLength(1);
+    expect(advisor.calls[0]).toEqual({ systemPrompt: 'sys', userMessage: 'review' });
+  });
+
+  test('zero-arg invocation: caller supplies systemPrompt + userMessage; tool params stay empty', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'plan', usage: { input_tokens: 1, output_tokens: 2 } });
+
+    // The pi tool itself takes zero args — the host always synthesizes
+    // systemPrompt/userMessage. Here we assert the seam doesn't reach into
+    // any extra positional state and only consumes what the request supplies.
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 'host-sys', userMessage: 'host-user', advisorModel: 'opus' },
+      advisor: advisor.callback,
+    });
+
+    expect(advisor.calls[0]?.systemPrompt).toBe('host-sys');
+    expect(advisor.calls[0]?.userMessage).toBe('host-user');
+    expect(result.details.stopReason).toBe('end_turn');
+  });
+
+  test('missing usage on advisor response surfaces details.usage = null', async () => {
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'no-usage' });
+    // Override callback to drop usage entirely.
+    const stripped: AdvisorCallback = async () => ({ text: 'no-usage' });
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: stripped,
+    });
+    expect(result.details.usage).toBeNull();
+    expect(result.details.stopReason).toBe('end_turn');
+  });
+
+  test('advisor returns errorCode → stopReason=error, errorMessage propagated', async () => {
+    const advisor: AdvisorCallback = async () => ({ text: '', errorCode: 'max_uses_exceeded' });
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor,
+    });
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toBe('max_uses_exceeded');
+  });
+
+  test('advisor callback throws → stopReason=error, errorMessage carries thrown message', async () => {
+    const advisor: AdvisorCallback = async () => {
+      throw new Error('boom');
+    };
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor,
+    });
+    expectWireCompatShape(result);
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toBe('boom');
+    expect(result.content).toEqual([{ type: 'text', text: '' }]);
+  });
+
+  test('aborted signal short-circuits with stopReason=aborted before dispatch', async () => {
+    const advisor = makeStubAdvisor();
+    const ctl = new AbortController();
+    ctl.abort();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+      signal: ctl.signal,
+    });
+    expect(advisor.calls).toHaveLength(0);
+    expect(result.details.stopReason).toBe('aborted');
+    expect(result.details.errorMessage).toContain('aborted');
+  });
+
+  test('signal aborted during advisor call → stopReason=aborted on thrown error', async () => {
+    const ctl = new AbortController();
+    const advisor: AdvisorCallback = async () => {
+      ctl.abort();
+      throw new Error('aborted by host');
+    };
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor,
+      signal: ctl.signal,
+    });
+    expect(result.details.stopReason).toBe('aborted');
+    expect(result.details.errorMessage).toBe('aborted by host');
+  });
+
+  test('PIORX_DISABLE_ADVISOR=1 short-circuits without calling advisor', async () => {
+    const advisor = makeStubAdvisor();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+      env: { [ADVISOR_DISABLE_ENV]: '1' },
+    });
+    expect(advisor.calls).toHaveLength(0);
+    expect(result.details.stopReason).toBe('error');
+    expect(result.details.errorMessage).toContain('PIORX_DISABLE_ADVISOR');
+  });
+
+  test('logEvent records canonical telemetry shape on every path', async () => {
+    const events: Array<{ message: string; details: unknown }> = [];
+    const advisor = makeStubAdvisor();
+    advisor.setResponse({ text: 'ok', usage: { input_tokens: 5, output_tokens: 3 } });
+
+    await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: advisor.callback,
+      logEvent: async (message, details) => {
+        events.push({ message, details });
+      },
+    });
+    // Same logEvent on the env-disabled path
+    await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'claude-opus-4-7' },
+      advisor: advisor.callback,
+      env: { [ADVISOR_DISABLE_ENV]: '1' },
+      logEvent: async (message, details) => {
+        events.push({ message, details });
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.message).toBe('runtime.advisor_tool');
+      const details = event.details as Record<string, unknown>;
+      expect(Object.keys(details).sort()).toEqual(
+        [
+          'advisor_input_tokens',
+          'advisor_model',
+          'advisor_output_tokens',
+          'disabled_by_env',
+          'effort',
+          'error_message',
+          'stop_reason',
+        ].sort(),
+      );
+    }
+    const successDetails = events[0]!.details as Record<string, unknown>;
+    expect(successDetails.stop_reason).toBe('end_turn');
+    expect(successDetails.disabled_by_env).toBe(false);
+    expect(successDetails.advisor_input_tokens).toBe(5);
+
+    const disabledDetails = events[1]!.details as Record<string, unknown>;
+    expect(disabledDetails.stop_reason).toBe('error');
+    expect(disabledDetails.disabled_by_env).toBe(true);
+    expect(disabledDetails.advisor_input_tokens).toBe(0);
+  });
+
+  test('effort defaults to null when caller does not supply one', async () => {
+    const advisor = makeStubAdvisor();
+    const result = await runAdvisorTool({
+      request: { systemPrompt: 's', userMessage: 'u', advisorModel: 'opus' },
+      advisor: advisor.callback,
+    });
+    expect(result.details.effort).toBeNull();
+  });
+});

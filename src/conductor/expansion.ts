@@ -145,9 +145,9 @@ export class ExpansionController {
       }
     }
 
-    const id = generateArtifactId('expansion-input-v1');
+    const id = generateArtifactId('piorx/expansion-input@1');
     const input: ExpansionInputV1 = {
-      artifact_type: 'expansion-input-v1',
+      artifact_type: 'piorx/expansion-input@1',
       artifact_id: id,
       intent_capture_id: capture.artifact_id,
       intent_restatement_id: restatement.artifact_id,
@@ -211,9 +211,9 @@ export class ExpansionController {
     }
 
     if (response.action === 'approve') {
-      const specId = generateArtifactId('intent-spec-v1');
+      const specId = generateArtifactId('piorx/intent-spec@1');
       const intentSpec: IntentSpecV1 = {
-        artifact_type: 'intent-spec-v1',
+        artifact_type: 'piorx/intent-spec@1',
         artifact_id: specId,
         expansion_input_id: this.currentExpansionInput.artifact_id,
         user_intent_verbatim: this.currentExpansionInput.user_intent_verbatim,
@@ -238,9 +238,9 @@ export class ExpansionController {
     if (response.action === 'revise') {
       // Create a new expansion input with the revised intent
       // Reuse the same capture/restatement references but update the verbatim
-      const newId = generateArtifactId('expansion-input-v1');
+      const newId = generateArtifactId('piorx/expansion-input@1');
       const newInput: ExpansionInputV1 = {
-        artifact_type: 'expansion-input-v1',
+        artifact_type: 'piorx/expansion-input@1',
         artifact_id: newId,
         intent_capture_id: this.currentExpansionInput.intent_capture_id,
         intent_restatement_id: this.currentExpansionInput.intent_restatement_id,

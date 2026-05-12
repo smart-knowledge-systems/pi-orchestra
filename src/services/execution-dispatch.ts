@@ -46,7 +46,7 @@ export async function executionDispatch(
   store: ArtifactStore,
 ): Promise<ExecutionDispatchResult> {
   // Load the change spec
-  const changeSpec = await store.get('change-spec-v1', input.change_spec_id);
+  const changeSpec = await store.get('piorx/change-spec@1', input.change_spec_id);
   if (!changeSpec) {
     return {
       status: 'error',

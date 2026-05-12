@@ -68,7 +68,7 @@ async function setupFiles() {
 
 function makeIndex(): RetrievalIndexV1 {
   return {
-    artifact_type: 'retrieval-index-v1',
+    artifact_type: 'piorx/retrieval-index@1',
     artifact_id: 'ri_bnd',
     intent_capture_id: 'ic_bnd',
     intent_restatement_id: 'ir_bnd',
@@ -197,9 +197,9 @@ function makeIndex(): RetrievalIndexV1 {
 
 function makePlan(index: RetrievalIndexV1, overrides?: Partial<EvidencePlanV1>): EvidencePlanV1 {
   return {
-    artifact_type: 'evidence-plan-v1',
+    artifact_type: 'piorx/evidence-plan@1',
     artifact_id: 'plan_bnd',
-    retrieval_index: { artifact_type: 'retrieval-index-v1', artifact_id: index.artifact_id },
+    retrieval_index: { artifact_type: 'piorx/retrieval-index@1', artifact_id: index.artifact_id },
     selection: {
       files: [
         {
@@ -232,7 +232,7 @@ function makePlan(index: RetrievalIndexV1, overrides?: Partial<EvidencePlanV1>):
 
 async function seedAll(index: RetrievalIndexV1, plan: EvidencePlanV1) {
   const capture: IntentCaptureV1 = {
-    artifact_type: 'intent-capture-v1',
+    artifact_type: 'piorx/intent-capture@1',
     artifact_id: 'ic_bnd',
     user_intent_verbatim: 'boundary test',
     cleaned_user_intent: 'boundary test',
@@ -240,7 +240,7 @@ async function seedAll(index: RetrievalIndexV1, plan: EvidencePlanV1) {
     timestamp: '2026-04-09T00:00:00Z',
   };
   const restatement: IntentRestatementV1 = {
-    artifact_type: 'intent-restatement-v1',
+    artifact_type: 'piorx/intent-restatement@1',
     artifact_id: 'ir_bnd',
     intent_capture_id: 'ic_bnd',
     user_intent_verbatim: 'boundary test',
@@ -403,7 +403,7 @@ describe('neighbor-line expansion boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     const ev = bundle!.raw_evidence[0]!;
     // Original span: start=10, count=20. With neighbor=3: start=7, count=26
     expect(ev.start).toBe(7);
@@ -495,7 +495,7 @@ describe('overlap merge boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     // Without dedup, we expect 2 separate evidence entries
     expect(bundle!.raw_evidence).toHaveLength(2);
   });
@@ -539,7 +539,7 @@ describe('overlap merge boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     // sl1 (10-29)+5 = 5-34 and sl2 (25-34)+5 = 20-39 overlap => merged to one
     expect(bundle!.raw_evidence).toHaveLength(1);
   });
@@ -580,7 +580,7 @@ describe('negative selection boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.raw_evidence).toHaveLength(0);
   });
 
@@ -614,7 +614,7 @@ describe('negative selection boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.raw_evidence).toHaveLength(0);
     // But structural context should still have skeleton and summary
     expect(bundle!.structural_context.files[0]!.ast_skeleton.length).toBeGreaterThan(0);
@@ -652,7 +652,7 @@ describe('negative selection boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     // Only small.ts should be present
     expect(bundle!.structural_context.files).toHaveLength(1);
     expect(bundle!.structural_context.files[0]!.path).toContain('small.ts');
@@ -720,7 +720,7 @@ describe('negative selection boundaries', () => {
       store,
     )) as EvidenceMaterializeResult;
 
-    const bundle = await store.get('evidence-bundle-v1', result.evidence_bundle_id!);
+    const bundle = await store.get('piorx/evidence-bundle@1', result.evidence_bundle_id!);
     expect(bundle!.structural_context.cross_file_findings).toEqual([]);
   });
 });

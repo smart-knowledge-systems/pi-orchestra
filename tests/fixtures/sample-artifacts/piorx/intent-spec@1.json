@@ -1,5 +1,5 @@
 {
-  "artifact_type": "intent-spec-v1",
+  "artifact_type": "piorx/intent-spec@1",
   "artifact_id": "spec_001",
   "expansion_input_id": "expand_in_001",
   "user_intent_verbatim": "I want to understand how model restore works and maybe change it.",

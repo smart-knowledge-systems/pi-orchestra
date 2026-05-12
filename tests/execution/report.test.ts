@@ -35,7 +35,7 @@ afterEach(async () => {
 
 function makeChangeSpec(): ChangeSpecV1 {
   return {
-    artifact_type: 'change-spec-v1',
+    artifact_type: 'piorx/change-spec@1',
     artifact_id: 'change_report_001',
     evidence_bundle_id: 'bundle_report_001',
     change_goal: 'Preserve valid custom model ids during session restore',
@@ -91,9 +91,9 @@ describe('execution report persistence', () => {
     expect(result.execution_report_id).not.toBeNull();
 
     // Load the stored report
-    const report = await store.get('execution-report-v1', result.execution_report_id!);
+    const report = await store.get('piorx/execution-report@1', result.execution_report_id!);
     expect(report).not.toBeNull();
-    expect(report!.artifact_type).toBe('execution-report-v1');
+    expect(report!.artifact_type).toBe('piorx/execution-report@1');
   });
 
   it('stored report passes schema validation', async () => {
@@ -109,7 +109,7 @@ describe('execution report persistence', () => {
       store,
     );
 
-    const report = await store.get('execution-report-v1', result.execution_report_id!);
+    const report = await store.get('piorx/execution-report@1', result.execution_report_id!);
     const validation = validateArtifact(report);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
@@ -129,7 +129,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -152,7 +152,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -174,7 +174,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -195,7 +195,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -216,7 +216,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -238,7 +238,7 @@ describe('execution report persistence', () => {
     );
 
     const report = (await store.get(
-      'execution-report-v1',
+      'piorx/execution-report@1',
       result.execution_report_id!,
     )) as ExecutionReportV1;
 
@@ -260,7 +260,7 @@ describe('execution report persistence', () => {
     );
 
     // Verify the report is listed in store
-    const allReports = await store.listByType('execution-report-v1');
+    const allReports = await store.listByType('piorx/execution-report@1');
     expect(allReports.length).toBeGreaterThanOrEqual(1);
     expect(allReports.some((r) => r.artifact_id === result.execution_report_id)).toBe(true);
   });

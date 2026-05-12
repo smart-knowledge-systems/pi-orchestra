@@ -23,7 +23,13 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createConfig } from '../../src/runtime/config.ts';
+import {
+  createConfig,
+  type PhaseModelConfigs,
+  type PipelinePhaseId,
+  validatePhaseModelConfigs,
+} from '../../src/runtime/config.ts';
+import type { AdvisorCallback, ExecutorCallback } from '../../src/runtime/run-with-advisor.ts';
 import { ArtifactStore } from '../../src/artifacts/store.ts';
 import { StageMachine } from '../../src/conductor/stage-machine.ts';
 import { Stage1Controller, type RestateFunction } from '../../src/conductor/stage-1.ts';
@@ -194,7 +200,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     expect(dispatchResult.retrieval_index_id).not.toBeNull();
 
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
     expect(index).not.toBeNull();
@@ -271,7 +277,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     );
     expect(dispatchResult.status).toBe('success');
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -289,7 +295,7 @@ describe('agentic retrieval flow — Stage 1 through evidence assembly', () => {
     expect(result.status).toBe('success');
 
     const bundle = (await store.get(
-      'evidence-bundle-v1',
+      'piorx/evidence-bundle@1',
       result.evidence_bundle_id!,
     )) as EvidenceBundleV1;
 
@@ -380,7 +386,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(scoutDispatch.status).toBe('success');
     expect(scoutDispatch.message).not.toContain('agent rounds=');
     const scoutIndex = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       scoutDispatch.retrieval_index_id!,
     )) as RetrievalIndexV1;
     const scoutPlan = createRecommendedEvidencePlan(scoutIndex);
@@ -452,7 +458,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(modelCalls[0]!.systemPromptLen).toBeGreaterThan(0);
 
     const agentIndex = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       agentDispatch.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -504,6 +510,129 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(serialized).not.toContain("return 'default-model'");
     expect(serialized).not.toContain("return 'fallback-model'");
     expect(serialized).not.toContain('session !== null && typeof session');
+  });
+
+  test("retrievalDispatch surfaces source_access_events from the agent's read_file actions", async () => {
+    // Wire the dispatch so the bounded retriever-agent issues a read_file
+    // action against a known file (round 1: continue + actions; round 2:
+    // stop with a recommendation). The dispatch result should carry
+    // `source_access_events` with the file path, the requested line
+    // count as the budget, and the action's `reason` — the audit data the
+    // retrieval stage adapter folds into lineage so the default workflow's
+    // `evidence_requirements: ['source-access-events']` is actually populated
+    // end-to-end (not just declared).
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    const READ_PATH = 'src/core/model-resolver.ts';
+    const READ_REASON = 'inspecting restoreModelFromSession definition';
+    const READ_LINES = 20;
+
+    const continueResponse = JSON.stringify({
+      status: 'continue',
+      summary: 'reading the tagged target',
+      actions: [
+        {
+          type: 'read_file',
+          path: READ_PATH,
+          mode: 'window',
+          start: 1,
+          count: READ_LINES,
+          reason: READ_REASON,
+        },
+      ],
+    });
+
+    const stopResponse = JSON.stringify({
+      status: 'stop',
+      summary: 'narrowed to the read target',
+      recommendation: {
+        strategy_summary: 'Confirmed the tagged file defines the target symbol.',
+        files: [
+          {
+            path: READ_PATH,
+            tier: 'selected',
+            default_evidence_mode: 'spans',
+            selection_reason: 'defines restoreModelFromSession',
+            include_ast_skeleton: true,
+            include_retriever_summary: true,
+            include_entire_file: false,
+            symbols: [
+              {
+                name: 'restoreModelFromSession',
+                start: 3,
+                count: 5,
+                selected_by_default: true,
+                default_neighbor_lines: 1,
+                selection_reason: 'primary target span',
+              },
+            ],
+          },
+        ],
+        cross_file_findings: [],
+        gaps: [],
+        followup_queries: [],
+        include_cross_file_findings: false,
+        include_gaps: false,
+        include_followup_queries: false,
+        confidence: 'high',
+      },
+    });
+
+    const responses = [continueResponse, stopResponse];
+    let callIdx = 0;
+    const retrieverAgentModel: AgentModelCallback = async () => {
+      const response = responses[callIdx] ?? stopResponse;
+      callIdx++;
+      return response;
+    };
+
+    const dispatch = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+      { retrieverAgentModel },
+    );
+
+    expect(dispatch.status).toBe('success');
+    expect(dispatch.message).toContain('agent rounds=2');
+    expect(dispatch.source_access_events).toBeDefined();
+    const events = dispatch.source_access_events!;
+    expect(events.length).toBeGreaterThanOrEqual(1);
+
+    const targetEvent = events.find((e) => e.file_path === READ_PATH);
+    expect(targetEvent).toBeDefined();
+    // budget.lines reflects the lines actually returned by the executor, not
+    // the requested count — bounded by file length and the agent's
+    // maxLinesPerRead. The audit trail records what was read, not what was
+    // asked for.
+    expect(targetEvent!.budget?.lines).toBeGreaterThan(0);
+    expect(targetEvent!.budget?.lines).toBeLessThanOrEqual(READ_LINES);
+    expect(targetEvent!.reason).toBe(READ_REASON);
+    // read_at is an ISO timestamp the dispatch stamps when extracting the
+    // event from the agent trace; the exact value is wall-clock so we just
+    // confirm it parses as a date.
+    expect(Number.isFinite(Date.parse(targetEvent!.read_at))).toBe(true);
+
+    // Scout-only dispatch (no model callback) carries no source-access
+    // events because there's no agent trace to extract from. Proves the
+    // events are agent-trace-derived, not scout-derived (which would over-
+    // report bulk file scoring as an audit signal).
+    const scoutOnly = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(scoutOnly.status).toBe('success');
+    expect(scoutOnly.source_access_events).toBeUndefined();
   });
 
   test('agent-driven bundle materializes only the agent-selected evidence', async () => {
@@ -563,7 +692,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     );
     expect(dispatchResult.status).toBe('success');
     const index = (await store.get(
-      'retrieval-index-v1',
+      'piorx/retrieval-index@1',
       dispatchResult.retrieval_index_id!,
     )) as RetrievalIndexV1;
 
@@ -581,7 +710,7 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     expect(result.status).toBe('success');
 
     const bundle = (await store.get(
-      'evidence-bundle-v1',
+      'piorx/evidence-bundle@1',
       result.evidence_bundle_id!,
     )) as EvidenceBundleV1;
 
@@ -597,5 +726,252 @@ describe('agentic retrieval flow — agent-driven retriever path', () => {
     for (const ev of bundle.raw_evidence) {
       expect(ev.path.endsWith('/src/core/model-resolver.ts')).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P2-T4 — Phase 2 gate: advisor=none for every phase preserves the E2E.
+//
+// Wires `config.models` with advisor.mode='none' for every PipelinePhaseId
+// and re-runs the canonical Stage 1 → retrieval → evidence flow. Today the
+// production callers exercised by this E2E do not invoke `runWithAdvisor`
+// directly (the helper is staged for Phase 3+), so wiring a non-trivial
+// `config.models` block is a defense-in-depth assertion that the runtime
+// kernel does not silently behave differently when models is populated.
+// ---------------------------------------------------------------------------
+
+describe('agentic retrieval flow — Phase 2 gate (advisor=none everywhere)', () => {
+  const ALL_PIPELINE_PHASES: PipelinePhaseId[] = [
+    'restatement',
+    'expansion',
+    'retrieval',
+    'synthesis',
+    'execution',
+  ];
+
+  function buildAdvisorNoneConfigs(): PhaseModelConfigs {
+    const block: PhaseModelConfigs = {};
+    for (const phase of ALL_PIPELINE_PHASES) {
+      block[phase] = {
+        executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        advisor: { mode: 'none' },
+      };
+    }
+    return block;
+  }
+
+  test('default pipeline produces the same evidence bundle with advisor=none wired across every phase', async () => {
+    config.models = buildAdvisorNoneConfigs();
+    const validation = validatePhaseModelConfigs(config.models);
+    expect(validation.ok).toBe(true);
+
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+
+    const dispatchResult = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    expect(dispatchResult.status).toBe('success');
+    const index = (await store.get(
+      'piorx/retrieval-index@1',
+      dispatchResult.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+
+    const plan = createRecommendedEvidencePlan(index);
+    await store.put(plan);
+
+    const result = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    expect(result.status).toBe('success');
+
+    const bundle = (await store.get(
+      'piorx/evidence-bundle@1',
+      result.evidence_bundle_id!,
+    )) as EvidenceBundleV1;
+
+    // Same shape invariants as the baseline E2E: bundle paths align with
+    // the plan; reserve files stay out of raw_evidence.
+    const planFileIds = new Set(plan.selection.files.map((f) => f.file_id));
+    const bundlePaths = new Set(bundle.structural_context.files.map((f) => f.path));
+    const planPaths = new Set(
+      index.files.filter((f) => planFileIds.has(f.file_id)).map((f) => f.path),
+    );
+    expect(bundlePaths).toEqual(planPaths);
+    for (const ev of bundle.raw_evidence) {
+      expect(planPaths.has(ev.path)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMP-P3-T3 — Phase 3 gate: synthesis worker with stubbed advisor.
+//
+// Adds a synthesis run on top of the canonical retrieval bundle, exercising
+// the LLM-driven path (`runWithAdvisor` + `runSynthesisWorker`'s `llm`
+// seam) with a stubbed advisor model. Asserts:
+//
+//   1. Existing E2E (advisor disabled) still passes byte-identically — the
+//      describe blocks above continue to run and pass.
+//   2. With advisor enabled (mode='custom'), the executor's iterations
+//      include the advisor consultation, telemetry records
+//      `advisor_iterations: 1` in `.pi/orchestra.log`, and the produced
+//      synthesis artifact is byte-identical (modulo artifact_id) to a
+//      `mode='none'` run with the same stub model — proving the advisor
+//      seam does not perturb output when the model is stubbed.
+// ---------------------------------------------------------------------------
+
+describe('agentic retrieval flow — Phase 3 gate (advisor=custom against stubbed advisor)', () => {
+  const ANALYSIS_OUTPUT = JSON.stringify({
+    artifact_type: 'piorx/analysis-report@1',
+    artifact_id: 'placeholder',
+    evidence_bundle_id: 'placeholder',
+    summary: 'Phase 3 gate stubbed analysis',
+    findings: ['restoreModelFromSession returns a fallback when auth is missing'],
+    risks: [],
+    recommended_next_steps: ['Add an integration test for the auth-missing branch'],
+  });
+
+  async function buildBundleFromCanonicalFlow(): Promise<EvidenceBundleV1> {
+    const intent = makeTaggedIntent();
+    const { capture, finalized } = await runStage1WithIntentFile(intent);
+    const dispatchResult = await retrievalDispatch(
+      {
+        intent_capture_id: capture.artifact_id,
+        intent_restatement_id: finalized.intent_restatement.artifact_id,
+        intent_spec_id: null,
+      },
+      store,
+      config,
+    );
+    const index = (await store.get(
+      'piorx/retrieval-index@1',
+      dispatchResult.retrieval_index_id!,
+    )) as RetrievalIndexV1;
+    const plan = createRecommendedEvidencePlan(index);
+    await store.put(plan);
+    const materialized = (await evidenceAssemble(
+      {
+        mode: 'materialize',
+        retrieval_index_id: index.artifact_id,
+        evidence_plan_id: plan.artifact_id,
+      },
+      store,
+    )) as EvidenceMaterializeResult;
+    return (await store.get(
+      'piorx/evidence-bundle@1',
+      materialized.evidence_bundle_id!,
+    )) as EvidenceBundleV1;
+  }
+
+  async function synthesizeWithMode(bundle: EvidenceBundleV1, advisorMode: 'none' | 'custom') {
+    const { runSynthesisWorker } = await import('../../src/synthesis/worker.ts');
+    const { assembleSynthesisPrompt } = await import('../../src/synthesis/prompt.ts');
+    const prompt = assembleSynthesisPrompt(bundle, {
+      sections: ['intent_context', 'structural_context', 'raw_evidence'],
+      instructions: 'Be precise.',
+      task_type: 'analysis-report',
+    });
+
+    const events: Array<{ message: string; details: unknown }> = [];
+    const executor: ExecutorCallback = async (req) => {
+      if (advisorMode === 'custom' && req.extras.customAdvisorHandler) {
+        await req.extras.customAdvisorHandler({
+          systemPrompt: 'advisor-system',
+          userMessage: 'advisor-user',
+        });
+      }
+      return {
+        text: ANALYSIS_OUTPUT,
+        iterations: [{ type: 'message', input_tokens: 100, output_tokens: 50 }],
+      };
+    };
+
+    const advisor: AdvisorCallback = async () => ({
+      text: 'Phase 3 stubbed advisor suggestion',
+      usage: { input_tokens: 30, output_tokens: 10 },
+    });
+
+    const advisorConfig =
+      advisorMode === 'none'
+        ? { mode: 'none' as const }
+        : { mode: 'custom' as const, model: 'claude-opus-4-7' };
+
+    const output = await runSynthesisWorker({
+      task_type: 'analysis-report',
+      bundle,
+      prompt_text: prompt.text,
+      instructions: 'Be precise.',
+      llm: {
+        config: {
+          executor: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          advisor: advisorConfig,
+        },
+        executor,
+        ...(advisorMode === 'custom' ? { advisor } : {}),
+        logEvent: (message, details) => {
+          events.push({ message, details });
+        },
+      },
+    });
+
+    return { output, events };
+  }
+
+  test('synthesis output is byte-identical across advisor=none and advisor=custom', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const noneRun = await synthesizeWithMode(bundle, 'none');
+    const customRun = await synthesizeWithMode(bundle, 'custom');
+
+    const stripId = (artifact: Record<string, unknown>) => ({
+      ...artifact,
+      artifact_id: 'normalized',
+    });
+    expect(stripId(customRun.output as unknown as Record<string, unknown>)).toEqual(
+      stripId(noneRun.output as unknown as Record<string, unknown>),
+    );
+    // The bundle id reference is preserved in both modes — the worker stamps
+    // it deterministically from the input bundle, not from the model.
+    expect(customRun.output.evidence_bundle_id).toBe(bundle.artifact_id);
+    expect(noneRun.output.evidence_bundle_id).toBe(bundle.artifact_id);
+  });
+
+  test('advisor=custom records advisor_iterations telemetry while synthesis succeeds', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const { output, events } = await synthesizeWithMode(bundle, 'custom');
+
+    expect(output.artifact_type).toBe('piorx/analysis-report@1');
+
+    const telemetry = events.find((e) => e.message === 'runtime.run_with_advisor')
+      ?.details as Record<string, unknown>;
+    expect(telemetry).toBeDefined();
+    expect(telemetry.mode).toBe('custom');
+    expect(telemetry.advisor_iterations).toBe(1);
+    expect(telemetry.advisor_model).toBe('claude-opus-4-7');
+    expect(telemetry.beta_header_sent).toBe(true);
+    expect(telemetry.disabled_by_env).toBe(false);
+  });
+
+  test('advisor=none produces telemetry with advisor_iterations=0 and no advisor model', async () => {
+    const bundle = await buildBundleFromCanonicalFlow();
+    const { events } = await synthesizeWithMode(bundle, 'none');
+    const telemetry = events.find((e) => e.message === 'runtime.run_with_advisor')
+      ?.details as Record<string, unknown>;
+    expect(telemetry).toBeDefined();
+    expect(telemetry.mode).toBe('none');
+    expect(telemetry.advisor_iterations).toBe(0);
+    expect(telemetry.advisor_model).toBeNull();
+    expect(telemetry.beta_header_sent).toBe(false);
   });
 });
