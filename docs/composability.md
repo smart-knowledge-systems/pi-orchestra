@@ -221,7 +221,7 @@ Each phase is independently shippable, behavior-preserving where possible, and g
 
 - Each `src/conductor/stage-*.ts` controller wrapped in a `Stage` adapter. The controller code is the `run()` body verbatim; only the type wrapper is new.
 - `src/conductor/stage-machine.ts` becomes a runtime validator over the active `Pipeline`'s edge list rather than a hard-coded transition map. The valid-transition table is generated from the pipeline.
-- `extensions/conductor-extension.ts:1040–1167` — `runPipelineFromIntent` is rewritten as `pipelineExecutor.run('piorx.default', initialIntent, ctx)`. The body of the function shrinks dramatically; the orchestration is in `PipelineExecutor`.
+- `extensions/conductor-extension.ts:1040–1167` — `runPipelineFromIntent` is rewritten as `workflowExecutor.run('piorx/workflow/default@1', initialIntent, ctx)`. The body of the function shrinks dramatically; the orchestration is in `WorkflowExecutor`.
 - `src/conductor/evidence-overrides.ts` re-exports its `EvidenceOverride` union as the first concrete `GateOp` and registers the `evidence.review` gate. No semantic change.
 - **Artifact-type IDs gain a hierarchical namespace.** Promote `intent-capture-v1` → `piorx/intent-capture@1` across `src/artifacts/types.ts`, `schemas.ts`, every fixture under `tests/fixtures/sample-artifacts/`, and the store path mappings. The `@N` is the Lexicon-style version separator; the prefix is the publisher namespace. Mechanical search-and-replace; the TS discriminated union and the `artifact_type` field stay, only the string values change. This costs nothing today and lets a future third-party stage register `@yourhandle/decision-tree@1` against the same validator registry without coordinating with the piorx maintainer.
 

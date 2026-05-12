@@ -131,7 +131,7 @@ With `advisor.mode === 'none'` for every stage, behavior matches Phase 1 exactly
 
 ### Changed
 
-- `src/synthesis/worker.ts` — replaces the stub with a real implementation that calls `runWithAdvisor` with `output_config.format` set from the JSON-Schema translation of `analysis-report-v1` and `change-spec-v1` validators (mechanical from `src/artifacts/schemas.ts`).
+- `src/synthesis/worker.ts` — replaces the stub with a real implementation that calls `runWithAdvisor` with `output_config.format` set from the JSON-Schema translation of `piorx/analysis-report@1` and `piorx/change-spec@1` validators (mechanical from `src/artifacts/schemas.ts`).
 - `src/synthesis/prompt.ts` — adds the `ADVISOR_TOOL_INSTRUCTIONS` (advisor doc §4.5, verbatim from Claude Code) when advisor is enabled.
 - The `synthesis.confirm-task-type` Gate gets a sibling `synthesis.advisor-review` Gate — opt-in, off by default.
 
@@ -148,7 +148,7 @@ Snapshot tests for both task types against a stubbed advisor; the existing E2E r
 ### Changed
 
 - Retriever rewrite collapses `src/retriever/agent.ts` (≈500 LOC) onto `agentLoop` from `@earendil-works/pi-agent-core` (already a transitive dep). Advisor slots in as one more `Tool`. The bounded-budget logic (`shouldStopAfterTurn`) is reused.
-- `src/execution/worker.ts` — same pattern as synthesis: `Stage` + `runWithAdvisor` + structured output (the `change-spec-v1` resolution).
+- `src/execution/worker.ts` — same pattern as synthesis: `Stage` + `runWithAdvisor` + structured output (the `piorx/change-spec@1` resolution).
 
 ### Phase 4 gate
 
@@ -191,7 +191,7 @@ Default workflow's `recursive_promotion_target=restatement` preserves current be
 
 - `bun test` is green.
 - `bunx tsc --noEmit` is clean.
-- Running piorx against the existing fixture intent (`tests/fixtures/sample-artifacts/intent-capture-v1.json` style) drives the default pipeline through to a synthesis artifact without manual intervention.
+- Running piorx against the existing fixture intent (`tests/fixtures/sample-artifacts/piorx/intent-capture@1.json` style) drives the default pipeline through to a synthesis artifact without manual intervention.
 
 ---
 
