@@ -6,6 +6,7 @@ PLAN_FILE="./auto-implement-composability.md"
 DESIGN_FILE="./docs/composability.md"
 DEV_LOG="./composability-dev-log.txt"
 MAX_ITERATIONS="${MAX_ITERATIONS:-100}"
+MAX_BUN_CHECK_ATTEMPTS="${MAX_BUN_CHECK_ATTEMPTS:-10}"
 DRY_RUN="${DRY_RUN:-0}"
 
 if [ "${1:-}" = "--dry-run" ]; then
@@ -233,6 +234,12 @@ run_bun_check_loop() {
 
     attempts=$((attempts + 1))
     append_log "bun failure $attempts" "$output"
+
+    if [ "$attempts" -ge "$MAX_BUN_CHECK_ATTEMPTS" ]; then
+      echo "bun validation failed after $attempts attempts; aborting (MAX_BUN_CHECK_ATTEMPTS=$MAX_BUN_CHECK_ATTEMPTS)." >&2
+      printf '%s\n' "$output" >&2
+      return 1
+    fi
 
     local tasks_json
     tasks_json="$(active_tasks_json)"
