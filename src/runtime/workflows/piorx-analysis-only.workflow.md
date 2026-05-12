@@ -134,7 +134,7 @@ governance:
 
 # piorx analysis-only workflow
 
-This is the reference second pipeline shipped alongside the default
+This is the reference secondary pipeline shipped alongside the default
 six-stage workflow per `docs/composability.md` "Phase 5 — Skills-as-strategies
 
 - filesystem discovery" and `auto-implement-composability.md` COMP-P5-T4.
