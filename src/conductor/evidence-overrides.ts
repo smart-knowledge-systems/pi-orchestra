@@ -551,8 +551,11 @@ export const evidenceReviewGate: GateSpec<EvidenceOverride> = {
   validateOverride(op: EvidenceOverride, ctx: StageContext): GateOpValidation {
     const errors: string[] = [];
 
-    // The three toggle ops do not reference a file; they are valid as long
-    // as the session has a plan to mutate.
+    // The three toggle ops do not reference a file; they are valid only
+    // because `applyOverride` still requires a retrieval-index in session,
+    // so we mirror that requirement here. Validation must not pass an op
+    // that apply will throw on — the gate would otherwise accept then
+    // crash at runtime.
     const isToggle =
       op.op === 'toggle_cross_file_findings' ||
       op.op === 'toggle_gaps' ||
@@ -561,7 +564,7 @@ export const evidenceReviewGate: GateSpec<EvidenceOverride> = {
     if (!ctx.session.artifacts.evidence_plan_id) {
       errors.push('evidence.review: no evidence-plan in session to apply override against');
     }
-    if (!isToggle && !ctx.session.artifacts.retrieval_index_id) {
+    if (!ctx.session.artifacts.retrieval_index_id) {
       errors.push('evidence.review: no retrieval-index in session to validate override against');
     }
     if (!isToggle) {
