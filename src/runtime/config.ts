@@ -166,6 +166,19 @@ export interface PhaseModelConfigValidation {
  * Phases omitted from the block are skipped — the runtime resolves them
  * from `ctx.model` with a deprecation warning per COMP-P2-T3.
  */
+/**
+ * Canonical set of phase ids that may carry a model configuration. Mirrors
+ * the `PipelinePhaseId` union; kept here as a runtime Set so the validator
+ * can reject typos rather than silently falling back to `ctx.model`.
+ */
+const VALID_PHASE_IDS = new Set<PipelinePhaseId>([
+  'restatement',
+  'expansion',
+  'retrieval',
+  'synthesis',
+  'execution',
+]);
+
 export function validatePhaseModelConfigs(
   configs: PhaseModelConfigs | undefined,
 ): PhaseModelConfigValidation {
@@ -173,6 +186,12 @@ export function validatePhaseModelConfigs(
   if (!configs) return { ok: true, errors };
 
   for (const [phase, config] of Object.entries(configs)) {
+    if (!VALID_PHASE_IDS.has(phase as PipelinePhaseId)) {
+      errors.push(
+        `models.${phase}: unknown phase id (expected one of ${[...VALID_PHASE_IDS].join(', ')})`,
+      );
+      continue;
+    }
     if (!config) continue;
     const executor = config.executor;
     if (!executor || !executor.provider?.trim() || !executor.model?.trim()) {
