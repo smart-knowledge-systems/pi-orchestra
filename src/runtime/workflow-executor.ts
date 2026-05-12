@@ -600,6 +600,18 @@ export class WorkflowExecutor {
 
     const result = await stageImpl.run(ctx);
     const { artifact, type } = await this.loadOutput(stageSpec, result);
+    // Advisory workflows are analysis-only by contract — they must never
+    // surface an executable artifact, even when a stage declares a union
+    // output (`piorx/analysis-report@1 | piorx/change-spec@1`) for
+    // adapter-compatibility with the default workflow. Enforce at the
+    // executor seam so a misconfigured host that forgets to pin
+    // `synthesisTaskType = 'analysis-report'` cannot smuggle a
+    // change-spec through an advisory pipeline.
+    if (spec.operating_mode === 'advisory' && type === 'piorx/change-spec@1') {
+      throw new WorkflowExecutorError(
+        `workflow "${spec.id}" stage "${stageSpec.id}": advisory operating_mode forbids piorx/change-spec@1 output`,
+      );
+    }
     this.applySessionPointers(type, result);
 
     const gateDecisions = await this.runGates(spec, stageSpec, ctx, prior, namespace);
@@ -675,6 +687,14 @@ export class WorkflowExecutor {
     // artifact disagrees with the parent stage's contract surfaces here.
     const surrogate: StageResult = { output_artifact_id: subResult.final_artifact_id };
     const { artifact, type } = await this.loadOutput(parentStageSpec, surrogate);
+    // Same advisory invariant the top-level runStage enforces — a sub-
+    // workflow that escalates output to a change-spec inside an advisory
+    // parent must be rejected, not silently promoted up the chain.
+    if (parentSpec.operating_mode === 'advisory' && type === 'piorx/change-spec@1') {
+      throw new WorkflowExecutorError(
+        `workflow "${parentSpec.id}" stage "${parentStageSpec.id}": advisory operating_mode forbids piorx/change-spec@1 output (sub-workflow descent)`,
+      );
+    }
     this.applySessionPointers(type, surrogate);
 
     // Parent gates run after the sub-workflow returns. The context's

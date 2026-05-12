@@ -211,6 +211,11 @@ otherwise reject divergent output declarations. Hosts driving the
 analysis-only flow set `synthesisTaskType = 'analysis-report'` in the
 executor's `contextExtras` so the worker never emits a change-spec.
 
+The runtime backstops that contract: `WorkflowExecutor.runStage` rejects
+any `piorx/change-spec@1` output when `operating_mode === advisory`, so a
+misconfigured host that forgets to pin `synthesisTaskType` halts the run
+instead of silently surfacing an executable artifact.
+
 The `synthesis.confirm-task-type` gate is omitted from this workflow
 because the task type is fixed. An extension that wants to re-introduce
 confirmation can register the gate against the synthesis stage and the
